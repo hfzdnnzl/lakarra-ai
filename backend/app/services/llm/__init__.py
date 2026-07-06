@@ -30,11 +30,15 @@ def build_llm_provider() -> LLMProvider:
     from .providers import AnthropicProvider, GeminiProvider, OpenAIProvider
 
     if provider == "openai":
-        return OpenAIProvider(settings.llm_model, settings.openai_api_key)
+        return OpenAIProvider(
+            settings.model_name,
+            settings.openai_api_key,
+            timeout=settings.llm_timeout_seconds,
+        )
     if provider == "anthropic":
-        return AnthropicProvider(settings.llm_model, settings.anthropic_api_key)
+        return AnthropicProvider(settings.model_name, settings.anthropic_api_key)
     if provider == "gemini":
-        return GeminiProvider(settings.llm_model, settings.gemini_api_key)
+        return GeminiProvider(settings.model_name, settings.gemini_api_key)
     raise ValueError(f"Unknown LLM provider: {provider}")
 
 
