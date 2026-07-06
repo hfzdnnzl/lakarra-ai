@@ -46,3 +46,13 @@ See `README.md` for the full architecture and standard run/lint/test commands.
 - **Adding an agent (no edits to existing agents):** create
   `backend/app/agents/<name>/agent.py` with a class decorated by `@register_agent`,
   then import it in `backend/app/agents/__init__.py`.
+- **Prompts are file-based, never hardcoded.** They live in
+  `backend/prompts/<agent>/{system,user}.md` and are loaded via
+  `app/services/prompts.py` (each template gets a content-hash `version` for logging).
+  User templates use `{{token}}` placeholders (not `str.format`) so JSON braces in
+  the prompt are preserved.
+- **Content Creator LLM:** defaults to the deterministic mock provider, which parses
+  the brief and returns a valid `ContentIdea` JSON — so `POST /api/content/generate`
+  works end-to-end with no API key. For real generation set `LLM_PROVIDER=openai`,
+  `OPENAI_API_KEY`, and `MODEL_NAME`. The agent pattern is: extend `BaseAgent`, load
+  prompts, call the LLM, then parse+validate into a Pydantic model.
