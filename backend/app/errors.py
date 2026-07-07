@@ -52,6 +52,11 @@ class OutputValidationError(LakarraError):
     http_status = 422
 
 
+class NotFoundError(LakarraError):
+    error_type = "not_found"
+    http_status = 404
+
+
 _ERROR_CLASSES = [
     MissingAPIKeyError,
     LLMTimeoutError,
@@ -59,6 +64,7 @@ _ERROR_CLASSES = [
     LLMCallError,
     InvalidJSONError,
     OutputValidationError,
+    NotFoundError,
 ]
 
 #: Map of ``error_type`` -> suggested HTTP status.

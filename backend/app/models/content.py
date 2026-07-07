@@ -6,6 +6,7 @@ LLM output is rejected by validation before it reaches the API or the dashboard.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
@@ -20,6 +21,21 @@ class ContentCategory(str, Enum):
     STORYTELLING = "storytelling"
     BEHIND_THE_SCENES = "behind_the_scenes"
     TREND_ADAPTATION = "trend_adaptation"
+
+
+class ContentStatus(str, Enum):
+    """Content lifecycle states (DRAFT -> ... -> ARCHIVED)."""
+
+    DRAFT = "draft"
+    REVIEW = "review"
+    APPROVED = "approved"
+    FILMING = "filming"
+    EDITING = "editing"
+    SCHEDULED = "scheduled"
+    POSTED = "posted"
+    ANALYZED = "analyzed"
+    PROMOTED = "promoted"
+    ARCHIVED = "archived"
 
 
 class TimelineScene(BaseModel):
@@ -85,10 +101,140 @@ class ContentRequest(BaseModel):
     constraints: list[str] = Field(default_factory=list)
 
 
+class GenerateRequest(ContentRequest):
+    """Generation request that may target an existing content item (regeneration)."""
+
+    #: When set, a new version is created on the existing content item.
+    content_id: str | None = None
+    temperature: float = 0.7
+
+
 class ContentResponse(BaseModel):
     """Envelope returned by the ``/content/generate`` endpoint."""
 
     success: bool
     data: ContentIdea | None = None
+    content_id: str | None = None
     error: str | None = None
     error_type: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# CMS read/request schemas (Phase 2.5)
+# ---------------------------------------------------------------------------
+
+
+class ContentSceneRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    sequence_number: int
+    start_time: int
+    end_time: int
+    scene_description: str
+    camera_direction: str
+    on_screen_text: str
+    voiceover: str | None = None
+    sound_effect: str | None = None
+
+
+class ContentSummary(BaseModel):
+    """Compact representation used in the Content Library list."""
+
+    model_config = {"from_attributes": True}
+
+    id: str
+    title: str
+    category: str
+    status: str
+    confidence_score: float
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContentRead(BaseModel):
+    """Full content record used by the detail page."""
+
+    model_config = {"from_attributes": True}
+
+    id: str
+    title: str
+    category: str
+    business_goal: str
+    target_audience: str
+    product: str
+    hook: str
+    duration: int
+    caption: str
+    hashtags: list[str]
+    cta: str
+    posting_time: str
+    confidence_score: float
+    music_suggestion: str | None = None
+    status: str
+    active_version: int
+    created_at: datetime
+    updated_at: datetime
+    scenes: list[ContentSceneRead] = Field(default_factory=list)
+
+
+class ContentVersionRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    version_number: int
+    hook: str
+    is_active: bool
+    created_at: datetime
+    snapshot: dict = Field(default_factory=dict)
+
+
+class FeedbackRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    message: str
+    created_by: str
+    created_at: datetime
+
+
+class StatusHistoryRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    old_status: str | None
+    new_status: str
+    changed_by: str
+    changed_at: datetime
+    comment: str | None = None
+
+
+class GenerationRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    model_used: str
+    prompt_version: str
+    temperature: float
+    token_usage: dict
+    generation_time: float
+    created_at: datetime
+
+
+class PaginatedContents(BaseModel):
+    items: list[ContentSummary]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
+class StatusUpdateRequest(BaseModel):
+    status: ContentStatus
+    changed_by: str = "user"
+    comment: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    message: str = Field(min_length=1)
+    created_by: str = "user"

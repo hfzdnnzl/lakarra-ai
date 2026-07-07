@@ -20,6 +20,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Databases / local storage
+*.db
+*.sqlite
+*.sqlite3
+backend/storage/
+
 # Misc
 .DS_Store
 *.log
