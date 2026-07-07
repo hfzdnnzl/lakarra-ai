@@ -109,6 +109,101 @@ export interface ContentGenerateRequest {
 export interface ContentGenerateResponse {
   success: boolean;
   data?: GeneratedContent | null;
+  content_id?: string | null;
   error?: string | null;
   error_type?: string | null;
 }
+
+// --- CMS (Phase 2.5) -------------------------------------------------------
+
+export interface ContentScene {
+  id: string;
+  sequence_number: number;
+  start_time: number;
+  end_time: number;
+  scene_description: string;
+  camera_direction: string;
+  on_screen_text: string;
+  voiceover?: string | null;
+  sound_effect?: string | null;
+}
+
+export interface ContentSummary {
+  id: string;
+  title: string;
+  category: string;
+  status: string;
+  confidence_score: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContentDetail {
+  id: string;
+  title: string;
+  category: string;
+  business_goal: string;
+  target_audience: string;
+  product: string;
+  hook: string;
+  duration: number;
+  caption: string;
+  hashtags: string[];
+  cta: string;
+  posting_time: string;
+  confidence_score: number;
+  music_suggestion?: string | null;
+  status: string;
+  active_version: number;
+  created_at: string;
+  updated_at: string;
+  scenes: ContentScene[];
+}
+
+export interface ContentVersion {
+  id: string;
+  version_number: number;
+  hook: string;
+  is_active: boolean;
+  created_at: string;
+  snapshot: Record<string, unknown>;
+}
+
+export interface Feedback {
+  id: string;
+  message: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface PaginatedContents {
+  items: ContentSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
+export const CONTENT_STATUSES = [
+  "draft",
+  "review",
+  "approved",
+  "filming",
+  "editing",
+  "scheduled",
+  "posted",
+  "analyzed",
+  "promoted",
+  "archived",
+] as const;
+
+export const CONTENT_CATEGORIES = [
+  "aesthetic",
+  "educational",
+  "product_comparison",
+  "pov",
+  "testimonial",
+  "storytelling",
+  "behind_the_scenes",
+  "trend_adaptation",
+] as const;

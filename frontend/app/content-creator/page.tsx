@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Loader2, Sparkles, ChevronDown, ChevronRight } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -134,12 +135,14 @@ export default function ContentCreatorPage() {
   const [constraints, setConstraints] = useState("Simple aesthetic\nLess than 15 seconds");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GeneratedContent | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const generate = async () => {
     setLoading(true);
     setError(null);
     setResult(null);
+    setSavedId(null);
     try {
       const res = await api.generateContent({
         business_goal: businessGoal,
@@ -152,6 +155,7 @@ export default function ContentCreatorPage() {
       });
       if (res.success && res.data) {
         setResult(res.data);
+        setSavedId(res.content_id ?? null);
       } else {
         setError(`${res.error_type ?? "error"}: ${res.error ?? "Generation failed"}`);
       }
@@ -218,6 +222,14 @@ export default function ContentCreatorPage() {
           {error ? (
             <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
+            </div>
+          ) : null}
+          {result && savedId ? (
+            <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              Saved to the Content Library.{" "}
+              <Link href={`/content/${savedId}`} className="font-medium underline">
+                View details →
+              </Link>
             </div>
           ) : null}
           {result ? (
