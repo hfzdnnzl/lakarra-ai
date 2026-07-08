@@ -8,16 +8,19 @@ from sqlalchemy.orm import Session
 
 from ..agents import get_agent_context
 from ..agents.content_analyst import ContentAnalystAgent
-from ..errors import LakarraError, NotFoundError
+from ..config import get_settings
+from ..errors import LakarraError, MissingAccountHandleError, NotFoundError
 from ..models.analytics import (
     AccountOverview,
+    AccountSettingsRead,
     AnalysisResponse,
     CompetitorOverview,
     HistoricalAnalytics,
     ReviewDecision,
     ReviewQueueItem,
+    normalize_tiktok_handle,
 )
-from ..providers import build_internal_content_provider
+from ..providers import build_internal_content_provider, build_tiktok_provider
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
 
@@ -37,11 +40,62 @@ class AnalyticsService:
         self._analyst = analyst or ContentAnalystAgent(ctx)
         self._analyst.set_internal_provider(build_internal_content_provider(session))
 
+    # --- Account handle ----------------------------------------------------
+    def get_account_settings(self) -> AccountSettingsRead:
+        row = self.repo.get_account_settings()
+        if row and row.tiktok_handle:
+            return AccountSettingsRead(
+                tiktok_handle=row.tiktok_handle,
+                configured=True,
+                source="database",
+            )
+        env_handle = normalize_tiktok_handle(get_settings().tiktok_account_handle)
+        if env_handle:
+            return AccountSettingsRead(
+                tiktok_handle=env_handle,
+                configured=True,
+                source="environment",
+            )
+        return AccountSettingsRead(configured=False, source="none")
+
+    def set_account_handle(self, handle: str) -> AccountSettingsRead:
+        normalized = normalize_tiktok_handle(handle)
+        if not normalized:
+            raise MissingAccountHandleError(
+                "TikTok handle is required. Enter your @handle without the @ symbol."
+            )
+        self.repo.set_account_handle(normalized)
+        self.session.commit()
+        return AccountSettingsRead(
+            tiktok_handle=normalized,
+            configured=True,
+            source="database",
+        )
+
+    def _resolve_handle(self) -> str | None:
+        settings = self.get_account_settings()
+        return settings.tiktok_handle if settings.configured else None
+
+    def _require_handle(self) -> str:
+        handle = self._resolve_handle()
+        if not handle:
+            raise MissingAccountHandleError(
+                "No TikTok account connected. Set your @handle in Analytics settings "
+                "or configure TIKTOK_ACCOUNT_HANDLE in the environment."
+            )
+        return handle
+
+    def _bind_tiktok_provider(self) -> str:
+        handle = self._require_handle()
+        self._analyst.set_tiktok_provider(build_tiktok_provider(handle))
+        return handle
+
     # --- Analyze operations ------------------------------------------------
     def analyze_video(
         self, video_id: str, *, content_id: str | None = None
     ) -> AnalysisResponse:
         try:
+            self._bind_tiktok_provider()
             posted = self.content_repo.list_past_posts(exclude_id=content_id or "", limit=10)
             historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
             result = self._analyst.analyze_video(
@@ -77,10 +131,11 @@ class AnalyticsService:
 
     def analyze_account(self) -> AnalysisResponse:
         try:
+            handle = self._bind_tiktok_provider()
             result = self._analyst.analyze_account()
-            version = self.repo.next_pattern_version("account")
+            version = self.repo.next_pattern_version(handle)
             row = self.repo.save_pattern_analysis(
-                subject_id="account",
+                subject_id=handle,
                 version=version,
                 agent=self._analyst.name,
                 provider=result.provider,
@@ -105,6 +160,7 @@ class AnalyticsService:
 
     def analyze_competitor(self, handle: str) -> AnalysisResponse:
         try:
+            self._bind_tiktok_provider()
             result = self._analyst.analyze_competitor(handle)
             version = self.repo.next_competitor_version(handle)
             row = self.repo.save_competitor_analysis(
@@ -164,6 +220,7 @@ class AnalyticsService:
 
     def generate_trend_report(self, *, period: str = "30d") -> AnalysisResponse:
         try:
+            self._bind_tiktok_provider()
             result = self._analyst.generate_trend_report(period=period)
             version = self.repo.next_trend_version(period)
             row = self.repo.save_trend_report(
@@ -197,9 +254,8 @@ class AnalyticsService:
             return AnalysisResponse(success=False, error=str(exc), error_type="error")
 
     def analyze_all_videos(self) -> list[AnalysisResponse]:
-        from ..providers import build_tiktok_provider
-
-        provider = build_tiktok_provider()
+        handle = self._require_handle()
+        provider = build_tiktok_provider(handle)
         results = []
         for video_data in provider.get_account().videos:
             resp = self.analyze_video(video_data.video.video_id)
@@ -246,12 +302,20 @@ class AnalyticsService:
 
     # --- Read operations ---------------------------------------------------
     def get_overview(self) -> AccountOverview:
-        from ..providers import build_tiktok_provider
+        settings = self.get_account_settings()
+        if not settings.configured or not settings.tiktok_handle:
+            return AccountOverview(
+                tiktok_handle=None,
+                account_configured=False,
+            )
 
-        account = build_tiktok_provider().get_account()
+        account = build_tiktok_provider(settings.tiktok_handle).get_account()
         videos = account.videos
         if not videos:
-            return AccountOverview()
+            return AccountOverview(
+                tiktok_handle=settings.tiktok_handle,
+                account_configured=True,
+            )
 
         total_views = sum(v.performance.views for v in videos)
         engagements = [
@@ -319,6 +383,8 @@ class AnalyticsService:
         health = health_scores[0].value if health_scores else round(avg_engagement * 10, 2)
 
         return AccountOverview(
+            tiktok_handle=settings.tiktok_handle,
+            account_configured=True,
             account_health_score=min(health, 1.0) if health <= 1 else health / 10,
             total_videos=len(videos),
             total_views=total_views,

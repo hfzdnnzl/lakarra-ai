@@ -17,7 +17,10 @@ from app.services.analytics_service import AnalyticsService
 @pytest.fixture
 def analyst(db_session: Session):
     ctx = get_agent_context()
-    agent = ContentAnalystAgent(ctx, tiktok=MockTikTokProvider())
+    agent = ContentAnalystAgent(
+        ctx,
+        tiktok=MockTikTokProvider("lakarra"),
+    )
     agent.set_internal_provider(build_internal_content_provider(db_session))
     return agent
 
@@ -57,6 +60,32 @@ class TestContentAnalystAgent:
 
 
 class TestAnalyticsService:
+    def test_account_settings_round_trip(self, analytics_service: AnalyticsService):
+        settings = analytics_service.get_account_settings()
+        assert settings.configured is True  # from TIKTOK_ACCOUNT_HANDLE in conftest
+
+        updated = analytics_service.set_account_handle("mybrand")
+        assert updated.tiktok_handle == "mybrand"
+        assert updated.configured is True
+        assert updated.source == "database"
+
+    def test_analyze_without_handle_fails(self, db_session: Session):
+        import os
+
+        from app.config import get_settings
+
+        old = os.environ.pop("TIKTOK_ACCOUNT_HANDLE", None)
+        get_settings.cache_clear()
+        try:
+            service = AnalyticsService(db_session)
+            resp = service.analyze_account()
+            assert resp.success is False
+            assert resp.error_type == "missing_account_handle"
+        finally:
+            if old is not None:
+                os.environ["TIKTOK_ACCOUNT_HANDLE"] = old
+            get_settings.cache_clear()
+
     def test_analyze_video_persists(self, analytics_service: AnalyticsService, db_session: Session):
         resp = analytics_service.analyze_video("lk-001")
         assert resp.success is True
@@ -100,6 +129,21 @@ class TestAnalyticsAPI:
   @pytest.fixture
   def client(self):
       return TestClient(app)
+
+  def test_account_settings_endpoint(self, client: TestClient):
+      resp = client.get("/api/analytics/account/settings")
+      assert resp.status_code == 200
+      data = resp.json()
+      assert data["configured"] is True
+      assert data["tiktok_handle"] == "lakarra"
+
+  def test_update_account_settings_endpoint(self, client: TestClient):
+      resp = client.put(
+          "/api/analytics/account/settings",
+          json={"tiktok_handle": "@myweddingbrand"},
+      )
+      assert resp.status_code == 200
+      assert resp.json()["tiktok_handle"] == "myweddingbrand"
 
   def test_overview_endpoint(self, client: TestClient):
       resp = client.get("/api/analytics/overview")

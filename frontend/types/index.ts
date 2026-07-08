@@ -260,6 +260,8 @@ export interface ReviewRunResponse {
 // --- Analytics (Phase 3) -----------------------------------------------------
 
 export interface AccountOverview {
+  tiktok_handle?: string | null;
+  account_configured: boolean;
   account_health_score: number;
   total_videos: number;
   total_views: number;
@@ -361,4 +363,10 @@ export interface AnalysisResponse {
   version?: number | null;
   error?: string | null;
   error_type?: string | null;
+}
+
+export interface AccountSettings {
+  tiktok_handle: string | null;
+  configured: boolean;
+  source: "database" | "environment" | "none";
 }

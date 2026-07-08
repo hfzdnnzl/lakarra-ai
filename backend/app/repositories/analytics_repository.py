@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..models.db import (
+    AnalyticsAccountSettingsORM,
     CommentAnalysisORM,
     CompetitorAnalysisORM,
     ContentAnalysisORM,
@@ -25,6 +26,19 @@ def _new_id() -> str:
 class AnalyticsRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    # --- Account settings --------------------------------------------------
+    def get_account_settings(self) -> AnalyticsAccountSettingsORM | None:
+        return self.session.get(AnalyticsAccountSettingsORM, "default")
+
+    def set_account_handle(self, handle: str) -> AnalyticsAccountSettingsORM:
+        row = self.get_account_settings()
+        if row is None:
+            row = AnalyticsAccountSettingsORM(id="default", tiktok_handle=handle)
+            self.session.add(row)
+        else:
+            row.tiktok_handle = handle
+        return row
 
     def _next_version(self, model: type, **filters) -> int:
         stmt = select(func.coalesce(func.max(model.version), 0)).where(

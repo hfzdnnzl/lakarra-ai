@@ -17,6 +17,7 @@ from ..models.analytics import (
     CompetitorAccountData,
     PerformanceMetrics,
     VideoInfo,
+    normalize_tiktok_handle,
 )
 from ..models.db import Content
 from ..repositories.content_repository import ContentRepository
@@ -224,7 +225,8 @@ def _mock_comments(rng: Random) -> list[str]:
 class MockTikTokProvider(TikTokProvider):
     """Deterministic mock TikTok data for development and testing."""
 
-    def __init__(self, seed: int = 42) -> None:
+    def __init__(self, handle: str, *, seed: int = 42) -> None:
+        self._handle = normalize_tiktok_handle(handle)
         self._rng = Random(seed)
 
     def get_account(self) -> TikTokAccountData:
@@ -234,10 +236,10 @@ class MockTikTokProvider(TikTokProvider):
             pub = base_date + timedelta(days=i * 12, hours=self._rng.randint(10, 21))
             video = VideoInfo(
                 video_id=raw["video_id"],
-                url=f"https://tiktok.com/@lakarra/video/{raw['video_id']}",
+                url=f"https://tiktok.com/@{self._handle}/video/{raw['video_id']}",
                 title=raw["title"],
-                caption=f"{raw['hook']} #wedding #digitalinvite #lakarra",
-                hashtags=["wedding", "digitalinvite", "lakarra", raw["category"]],
+                caption=f"{raw['hook']} #wedding #digitalinvite #{self._handle}",
+                hashtags=["wedding", "digitalinvite", self._handle, raw["category"]],
                 publish_date=pub.strftime("%Y-%m-%d"),
                 publish_time=pub.strftime("%H:%M"),
                 duration=raw["duration"],
@@ -250,7 +252,9 @@ class MockTikTokProvider(TikTokProvider):
                     video=video, performance=perf, comments=_mock_comments(self._rng)
                 )
             )
-        return TikTokAccountData(handle="lakarra", follower_count=34200, videos=videos)
+        return TikTokAccountData(
+            handle=self._handle, follower_count=34200, videos=videos
+        )
 
     def get_video(self, video_id: str) -> TikTokVideoData | None:
         for v in self.get_account().videos:
@@ -312,8 +316,10 @@ class InternalContentProviderImpl(InternalContentProvider):
         return review + approved
 
 
-def build_tiktok_provider() -> TikTokProvider:
-    return MockTikTokProvider()
+def build_tiktok_provider(handle: str) -> TikTokProvider:
+    """Build a TikTok data provider for the given @handle."""
+
+    return MockTikTokProvider(normalize_tiktok_handle(handle))
 
 
 def build_competitor_provider() -> CompetitorProvider:

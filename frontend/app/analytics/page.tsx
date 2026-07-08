@@ -1,24 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Link2, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 import { AnalyticsNav } from "@/components/AnalyticsNav";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import type { AccountOverview } from "@/types";
+import type { AccountOverview, AccountSettings } from "@/types";
 
 export default function AnalyticsOverviewPage() {
   const [overview, setOverview] = useState<AccountOverview | null>(null);
+  const [settings, setSettings] = useState<AccountSettings | null>(null);
+  const [handleInput, setHandleInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setOverview(await api.analyticsOverview());
+      const [ov, st] = await Promise.all([
+        api.analyticsOverview(),
+        api.analyticsAccountSettings(),
+      ]);
+      setOverview(ov);
+      setSettings(st);
+      setHandleInput(st.tiktok_handle ?? "");
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -29,7 +40,30 @@ export default function AnalyticsOverviewPage() {
     load();
   }, [load]);
 
+  const saveAccount = async () => {
+    const trimmed = handleInput.trim().replace(/^@/, "");
+    if (!trimmed) {
+      setError("Enter your TikTok @handle.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const st = await api.updateAnalyticsAccount(trimmed);
+      setSettings(st);
+      setHandleInput(st.tiktok_handle ?? trimmed);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const runAccountAnalysis = async () => {
+    if (!settings?.configured) {
+      setError("Connect your TikTok account before running analysis.");
+      return;
+    }
     setBusy(true);
     try {
       await api.analyzeAccount();
@@ -41,13 +75,15 @@ export default function AnalyticsOverviewPage() {
     }
   };
 
+  const configured = settings?.configured ?? overview?.account_configured ?? false;
+
   return (
     <>
       <PageHeader
         title="Analytics"
         description="Marketing intelligence from the Content Analyst agent."
         action={
-          <Button onClick={runAccountAnalysis} disabled={busy} size="sm">
+          <Button onClick={runAccountAnalysis} disabled={busy || !configured} size="sm">
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             Analyze Account
           </Button>
@@ -59,10 +95,66 @@ export default function AnalyticsOverviewPage() {
           {error}
         </div>
       ) : null}
-      {!overview ? (
+
+      <Card className="mb-8 border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Link2 className="h-4 w-4" />
+            Connect Your TikTok Account
+          </CardTitle>
+          <CardDescription>
+            Enter the @handle for the Lakarra TikTok account you want analyzed (without the @).
+            This is required before the Content Analyst can pull video and performance data.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="tiktok-handle">TikTok handle</Label>
+              <div className="flex">
+                <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground">
+                  @
+                </span>
+                <Input
+                  id="tiktok-handle"
+                  value={handleInput}
+                  onChange={(e) => setHandleInput(e.target.value)}
+                  placeholder="yourbrand"
+                  className="rounded-l-none"
+                />
+              </div>
+            </div>
+            <Button onClick={saveAccount} disabled={saving}>
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Save Account
+            </Button>
+          </div>
+          {configured && settings?.tiktok_handle ? (
+            <p className="mt-3 text-sm text-emerald-700">
+              Connected: @{settings.tiktok_handle}
+              {settings.source === "environment" ? " (from environment variable)" : ""}
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-amber-700">
+              No account connected yet. Analysis is disabled until you save your handle.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {!configured ? (
+        <p className="text-muted-foreground">
+          Connect your TikTok account above to see performance data and run analyses.
+        </p>
+      ) : !overview ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
         <>
+          {overview.tiktok_handle ? (
+            <p className="mb-4 text-sm text-muted-foreground">
+              Showing data for @{overview.tiktok_handle}
+            </p>
+          ) : null}
           <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">

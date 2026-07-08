@@ -390,3 +390,12 @@ class MetricsSnapshotORM(TimestampMixin, Base):
     value: Mapped[float] = mapped_column(Float)
     dimension: Mapped[str | None] = mapped_column(String(128), nullable=True)
     context: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AnalyticsAccountSettingsORM(TimestampMixin, Base):
+    """Singleton row storing the connected Lakarra TikTok account handle."""
+
+    __tablename__ = "analytics_account_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
+    tiktok_handle: Mapped[str] = mapped_column(String(128), default="")

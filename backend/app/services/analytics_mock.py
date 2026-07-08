@@ -225,7 +225,7 @@ def build_analyst_mock_response(system_text: str, user_text: str) -> str | None:
         title_match = re.search(r'"title":\s*"([^"]+)"', user_text)
         from ..providers import MockTikTokProvider
 
-        provider = MockTikTokProvider()
+        provider = MockTikTokProvider("lakarra")
         vid = video_id_match.group(1) if video_id_match else "lk-001"
         data = provider.get_video(vid)
         if data is None:

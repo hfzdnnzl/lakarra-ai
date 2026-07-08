@@ -10,7 +10,13 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def normalize_tiktok_handle(value: str) -> str:
+    """Strip @ and whitespace; lowercase for consistent lookups."""
+
+    return value.strip().lstrip("@").lower()
 
 # ---------------------------------------------------------------------------
 # Shared building blocks
@@ -290,6 +296,8 @@ class MetricsSnapshotRead(BaseModel):
 
 
 class AccountOverview(BaseModel):
+    tiktok_handle: str | None = None
+    account_configured: bool = False
     account_health_score: float = 0.0
     total_videos: int = 0
     total_views: int = 0
@@ -334,3 +342,21 @@ class AnalysisResponse(BaseModel):
     version: int | None = None
     error: str | None = None
     error_type: str | None = None
+
+
+class AccountSettingsRead(BaseModel):
+    tiktok_handle: str | None = None
+    configured: bool = False
+    source: str = "none"  # "database" | "environment" | "none"
+
+
+class AccountSettingsUpdate(BaseModel):
+    tiktok_handle: str = Field(min_length=1, max_length=128)
+
+    @field_validator("tiktok_handle")
+    @classmethod
+    def _normalize_handle(cls, value: str) -> str:
+        normalized = normalize_tiktok_handle(value)
+        if not normalized:
+            raise ValueError("TikTok handle cannot be empty.")
+        return normalized

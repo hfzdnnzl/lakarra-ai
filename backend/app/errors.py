@@ -57,6 +57,11 @@ class NotFoundError(LakarraError):
     http_status = 404
 
 
+class MissingAccountHandleError(LakarraError):
+    error_type = "missing_account_handle"
+    http_status = 400
+
+
 _ERROR_CLASSES = [
     MissingAPIKeyError,
     LLMTimeoutError,
@@ -65,6 +70,7 @@ _ERROR_CLASSES = [
     InvalidJSONError,
     OutputValidationError,
     NotFoundError,
+    MissingAccountHandleError,
 ]
 
 #: Map of ``error_type`` -> suggested HTTP status.

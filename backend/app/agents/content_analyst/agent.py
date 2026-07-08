@@ -29,7 +29,6 @@ from ...providers import (
     TikTokProvider,
     TikTokVideoData,
     build_competitor_provider,
-    build_tiktok_provider,
 )
 from ...services.json_utils import extract_json
 from ...services.prompts import load_prompt
@@ -107,12 +106,24 @@ class ContentAnalystAgent(BaseAgent):
         internal: InternalContentProvider | None = None,
     ) -> None:
         super().__init__(context)
-        self._tiktok = tiktok or build_tiktok_provider()
+        self._tiktok = tiktok
         self._competitor = competitor or build_competitor_provider()
         self._internal = internal
 
     def set_internal_provider(self, provider: InternalContentProvider) -> None:
         self._internal = provider
+
+    def set_tiktok_provider(self, provider: TikTokProvider) -> None:
+        self._tiktok = provider
+
+    def _tiktok_or_raise(self) -> TikTokProvider:
+        if self._tiktok is None:
+            from ...errors import MissingAccountHandleError
+
+            raise MissingAccountHandleError(
+                "No TikTok account connected. Set your @handle in Analytics settings."
+            )
+        return self._tiktok
 
     # --- LLM analysis helpers ---------------------------------------------
     def _run_prompt(
@@ -220,7 +231,7 @@ class ContentAnalystAgent(BaseAgent):
     ) -> AgentAnalysisResult:
         """Analyze a published Lakarra TikTok video."""
 
-        video_data = self._tiktok.get_video(video_id)
+        video_data = self._tiktok_or_raise().get_video(video_id)
         if video_data is None:
             from ...errors import NotFoundError
 
@@ -231,7 +242,7 @@ class ContentAnalystAgent(BaseAgent):
     def analyze_account(self) -> AgentAnalysisResult:
         """Analyze historical Lakarra account performance and detect patterns."""
 
-        account = self._tiktok.get_account()
+        account = self._tiktok_or_raise().get_account()
         video_history = json.dumps(
             [
                 {
@@ -270,7 +281,7 @@ class ContentAnalystAgent(BaseAgent):
         """Analyze a competitor TikTok account."""
 
         account = self._competitor.get_account(handle)
-        lakarra = self._tiktok.get_account()
+        lakarra = self._tiktok_or_raise().get_account()
         return self._run_prompt(
             "content_analyst_competitor",
             {
@@ -309,7 +320,7 @@ class ContentAnalystAgent(BaseAgent):
     def generate_trend_report(self, *, period: str = "30d") -> AgentAnalysisResult:
         """Generate a trend report from historical analysis."""
 
-        account = self._tiktok.get_account()
+        account = self._tiktok_or_raise().get_account()
         pattern_result = self.analyze_account()
         recent = json.dumps(
             [
@@ -366,7 +377,7 @@ class ContentAnalystAgent(BaseAgent):
 
         return [
             self._analyze_video_data(v)
-            for v in self._tiktok.get_account().videos
+            for v in self._tiktok_or_raise().get_account().videos
         ]
 
     # --- Workflow entry point -----------------------------------------------

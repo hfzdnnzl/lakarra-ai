@@ -9,6 +9,8 @@ from ...database.session import get_db
 from ...errors import status_for
 from ...models.analytics import (
     AccountOverview,
+    AccountSettingsRead,
+    AccountSettingsUpdate,
     AnalysisResponse,
     AnalyzeCompetitorRequest,
     AnalyzeVideoRequest,
@@ -25,6 +27,27 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 def _service(db: Session = Depends(get_db)) -> AnalyticsService:
     return AnalyticsService(db)
+
+
+# --- Account settings --------------------------------------------------------
+@router.get("/account/settings", response_model=AccountSettingsRead)
+def get_account_settings(service: AnalyticsService = Depends(_service)) -> AccountSettingsRead:
+    return service.get_account_settings()
+
+
+@router.put("/account/settings", response_model=AccountSettingsRead)
+def update_account_settings(
+    body: AccountSettingsUpdate,
+    service: AnalyticsService = Depends(_service),
+) -> AccountSettingsRead:
+    try:
+        return service.set_account_handle(body.tiktok_handle)
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
 
 
 # --- Analysis triggers -------------------------------------------------------

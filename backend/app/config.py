@@ -82,6 +82,11 @@ class Settings(BaseSettings):
         default_factory=lambda: ["video/mp4", "video/quicktime", "video/webm"]
     )
 
+    # --- TikTok analytics (Content Analyst) --------------------------------
+    # Your Lakarra TikTok @handle (without @). Can also be set via the dashboard
+    # or PUT /api/analytics/account/settings — the saved value takes precedence.
+    tiktok_account_handle: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

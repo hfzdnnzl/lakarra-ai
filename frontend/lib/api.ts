@@ -119,6 +119,13 @@ export const api = {
     }),
 
   // --- Analytics (Phase 3) -------------------------------------------------
+  analyticsAccountSettings: () =>
+    request<import("@/types").AccountSettings>("/analytics/account/settings"),
+  updateAnalyticsAccount: (tiktok_handle: string) =>
+    request<import("@/types").AccountSettings>("/analytics/account/settings", {
+      method: "PUT",
+      body: JSON.stringify({ tiktok_handle }),
+    }),
   analyticsOverview: () => request<import("@/types").AccountOverview>("/analytics/overview"),
   analyticsContent: () =>
     request<{ overview: import("@/types").AccountOverview; analyses: import("@/types").ContentAnalysisRecord[] }>(
