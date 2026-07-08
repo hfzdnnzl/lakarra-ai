@@ -9,8 +9,11 @@ from __future__ import annotations
 import os
 
 # Configure the app for testing *before* it is imported.
-os.environ.setdefault("AUTO_INIT_DB", "false")
-os.environ.setdefault("DATABASE_URL", "sqlite://")
+# Force these values (not setdefault): a local .env may set LLM_PROVIDER=openai
+# for manual dev, but tests must stay deterministic and offline.
+os.environ["AUTO_INIT_DB"] = "false"
+os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["LLM_PROVIDER"] = "mock"
 
 import pytest  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
