@@ -363,6 +363,72 @@ export interface AnalysisResponse {
   version?: number | null;
   error?: string | null;
   error_type?: string | null;
+  skipped?: boolean;
+  skip_reason?: string | null;
+}
+
+export interface VideoMetrics {
+  video_id: string;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  reach?: number | null;
+  watch_time?: number | null;
+  average_watch_duration?: number | null;
+  completion_rate?: number | null;
+  profile_visits?: number | null;
+  followers_gained?: number | null;
+  link_clicks?: number | null;
+  user_notes?: string | null;
+  required_complete: boolean;
+  missing_required: string[];
+  metrics_priority: string;
+}
+
+export interface VideoCatalogItem {
+  video_id: string;
+  title: string;
+  url: string;
+  caption: string;
+  publish_date: string;
+  duration: number;
+  thumbnail: string;
+  is_analyzed: boolean;
+  analysis_version: number | null;
+  analysis_id: string | null;
+  analysis_summary: string | null;
+  metrics: VideoMetrics;
+  metrics_priority: string;
+}
+
+export interface MetricsReadiness {
+  ready: boolean;
+  total_videos: number;
+  complete_videos: number;
+  incomplete_videos: Array<{
+    video_id: string;
+    title: string;
+    missing_required: string[];
+  }>;
+  required_fields: string[];
+  optional_fields: string[];
+  optional_recommended_for: string[];
+}
+
+export interface ContentAnalyticsPage {
+  overview: AccountOverview;
+  readiness: MetricsReadiness;
+  videos: VideoCatalogItem[];
+  required_field_labels: Record<string, string>;
+  optional_field_labels: Record<string, string>;
+}
+
+export interface AnalyzeAllResponse {
+  analyzed: AnalysisResponse[];
+  skipped_video_ids: string[];
+  errors: Array<{ video_id: string; error?: string; error_type?: string }>;
 }
 
 export interface AccountSettings {

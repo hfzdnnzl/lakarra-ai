@@ -16,6 +16,7 @@ import type { AccountOverview, AccountSettings } from "@/types";
 export default function AnalyticsOverviewPage() {
   const [overview, setOverview] = useState<AccountOverview | null>(null);
   const [settings, setSettings] = useState<AccountSettings | null>(null);
+  const [metricsReady, setMetricsReady] = useState<boolean | null>(null);
   const [handleInput, setHandleInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -23,13 +24,15 @@ export default function AnalyticsOverviewPage() {
 
   const load = useCallback(async () => {
     try {
-      const [ov, st] = await Promise.all([
+      const [ov, st, readiness] = await Promise.all([
         api.analyticsOverview(),
         api.analyticsAccountSettings(),
+        api.analyticsMetricsReadiness().catch(() => null),
       ]);
       setOverview(ov);
       setSettings(st);
       setHandleInput(st.tiktok_handle ?? "");
+      setMetricsReady(readiness?.ready ?? null);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -83,7 +86,7 @@ export default function AnalyticsOverviewPage() {
         title="Analytics"
         description="Marketing intelligence from the Content Analyst agent."
         action={
-          <Button onClick={runAccountAnalysis} disabled={busy || !configured} size="sm">
+          <Button onClick={runAccountAnalysis} disabled={busy || !configured || metricsReady === false} size="sm">
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             Analyze Account
           </Button>
@@ -129,6 +132,15 @@ export default function AnalyticsOverviewPage() {
               Save Account
             </Button>
           </div>
+          {configured && metricsReady === false ? (
+            <p className="mt-3 text-sm text-amber-700">
+              Complete required video metrics in{" "}
+              <Link href="/analytics/content" className="underline">
+                Content Analytics
+              </Link>{" "}
+              before running account analysis.
+            </p>
+          ) : null}
           {configured && settings?.tiktok_handle ? (
             <p className="mt-3 text-sm text-emerald-700">
               Connected: @{settings.tiktok_handle}

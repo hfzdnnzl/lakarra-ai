@@ -12,13 +12,18 @@ from ...models.analytics import (
     AccountSettingsRead,
     AccountSettingsUpdate,
     AnalysisResponse,
+    AnalyzeAllResponse,
     AnalyzeCompetitorRequest,
     AnalyzeVideoRequest,
     CompetitorOverview,
+    ContentAnalyticsPage,
     HistoricalAnalytics,
+    MetricsReadiness,
     ReviewDecisionRequest,
     ReviewQueueItem,
     TrendReportRequest,
+    VideoMetricsData,
+    VideoMetricsRead,
 )
 from ...services.analytics_service import AnalyticsService
 
@@ -62,17 +67,67 @@ def analyze_account(service: AnalyticsService = Depends(_service)) -> AnalysisRe
 @router.post("/videos/analyze", response_model=AnalysisResponse)
 def analyze_video(
     body: AnalyzeVideoRequest,
+    force: bool = False,
     service: AnalyticsService = Depends(_service),
 ) -> AnalysisResponse:
-    result = service.analyze_video(body.video_id, content_id=body.content_id)
+    result = service.analyze_video(
+        body.video_id, content_id=body.content_id, force=force
+    )
     if not result.success:
         raise HTTPException(status_for(result.error_type), detail=result.error)
     return result
 
 
-@router.post("/videos/analyze-all")
-def analyze_all_videos(service: AnalyticsService = Depends(_service)) -> list[AnalysisResponse]:
-    return service.analyze_all_videos()
+@router.post("/videos/{video_id}/analyze", response_model=AnalysisResponse)
+def analyze_video_by_id(
+    video_id: str,
+    force: bool = False,
+    service: AnalyticsService = Depends(_service),
+) -> AnalysisResponse:
+    result = service.analyze_video(video_id, force=force)
+    if not result.success:
+        raise HTTPException(status_for(result.error_type), detail=result.error)
+    return result
+
+
+@router.post("/videos/analyze-all", response_model=AnalyzeAllResponse)
+def analyze_all_videos(service: AnalyticsService = Depends(_service)) -> AnalyzeAllResponse:
+    try:
+        return service.analyze_all_videos()
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
+
+
+@router.put("/videos/{video_id}/metrics", response_model=VideoMetricsRead)
+def update_video_metrics(
+    video_id: str,
+    body: VideoMetricsData,
+    service: AnalyticsService = Depends(_service),
+) -> VideoMetricsRead:
+    try:
+        return service.update_video_metrics(video_id, body)
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
+
+
+@router.get("/metrics/readiness", response_model=MetricsReadiness)
+def get_metrics_readiness(service: AnalyticsService = Depends(_service)) -> MetricsReadiness:
+    try:
+        return service.get_metrics_readiness()
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
 
 
 @router.post("/competitors/analyze", response_model=AnalysisResponse)
@@ -133,14 +188,16 @@ def get_overview(service: AnalyticsService = Depends(_service)) -> AccountOvervi
     return service.get_overview()
 
 
-@router.get("/content")
-def get_content_analytics(service: AnalyticsService = Depends(_service)) -> dict:
-    overview = service.get_overview()
-    historical = service.get_historical()
-    return {
-        "overview": overview.model_dump(),
-        "analyses": [a.model_dump() for a in historical.content_analyses],
-    }
+@router.get("/content", response_model=ContentAnalyticsPage)
+def get_content_analytics(service: AnalyticsService = Depends(_service)) -> ContentAnalyticsPage:
+    try:
+        return service.get_content_page()
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
 
 
 @router.get("/competitors", response_model=CompetitorOverview)

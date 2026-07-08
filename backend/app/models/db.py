@@ -399,3 +399,28 @@ class AnalyticsAccountSettingsORM(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
     tiktok_handle: Mapped[str] = mapped_column(String(128), default="")
+
+
+class VideoMetricsORM(TimestampMixin, Base):
+    """User-editable TikTok metrics per video (supplements public API data)."""
+
+    __tablename__ = "video_metrics"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    tiktok_handle: Mapped[str] = mapped_column(String(128), index=True)
+    # Required metrics
+    views: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    likes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comments: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    shares: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    saves: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Optional metrics (TikTok Studio / Creator Center)
+    reach: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    watch_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_watch_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completion_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    profile_visits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    followers_gained: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    link_clicks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

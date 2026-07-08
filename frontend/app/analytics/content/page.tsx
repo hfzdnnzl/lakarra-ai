@@ -5,23 +5,21 @@ import { Loader2, Play } from "lucide-react";
 
 import { AnalyticsNav } from "@/components/AnalyticsNav";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
+import { VideoAnalyticsCard } from "@/components/VideoAnalyticsCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import type { AccountOverview, ContentAnalysisRecord } from "@/types";
+import type { ContentAnalyticsPage } from "@/types";
 
 export default function ContentAnalyticsPage() {
-  const [overview, setOverview] = useState<AccountOverview | null>(null);
-  const [analyses, setAnalyses] = useState<ContentAnalysisRecord[]>([]);
+  const [page, setPage] = useState<ContentAnalyticsPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [analyzeResult, setAnalyzeResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await api.analyticsContent();
-      setOverview(data.overview);
-      setAnalyses(data.analyses);
+      setPage(await api.analyticsContent());
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -33,9 +31,17 @@ export default function ContentAnalyticsPage() {
   }, [load]);
 
   const analyzeAll = async () => {
+    if (!page?.readiness.ready) {
+      setError("Complete required metrics for all videos before running bulk analysis.");
+      return;
+    }
     setBusy(true);
+    setAnalyzeResult(null);
     try {
-      await api.analyzeAllVideos();
+      const result = await api.analyzeAllVideos();
+      setAnalyzeResult(
+        `Analyzed ${result.analyzed.length} video(s), skipped ${result.skipped_video_ids.length} already analyzed.`,
+      );
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -44,15 +50,17 @@ export default function ContentAnalyticsPage() {
     }
   };
 
+  const ready = page?.readiness.ready ?? false;
+
   return (
     <>
       <PageHeader
         title="Content Analytics"
-        description="TikTok video performance, engagement, and quality analysis."
+        description="Confirm TikTok Studio metrics, then run AI analysis on your videos."
         action={
-          <Button onClick={analyzeAll} disabled={busy} size="sm">
+          <Button onClick={analyzeAll} disabled={busy || !ready} size="sm">
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-            Analyze All Videos
+            Analyze New Videos
           </Button>
         }
       />
@@ -62,100 +70,100 @@ export default function ContentAnalyticsPage() {
           {error}
         </div>
       ) : null}
-
-      {overview ? (
-        <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Account Health</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold">
-                {(overview.account_health_score * 100).toFixed(0)}%
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Growth Trend</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold">
-                {overview.growth_trends[0]?.followers
-                  ? `${Number(overview.growth_trends[0].followers).toLocaleString()} followers`
-                  : "—"}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Posting Heatmap</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold">{Object.keys(overview.posting_heatmap).length} slots</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Saved Analyses</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-semibold">{analyses.length}</div>
-            </CardContent>
-          </Card>
+      {analyzeResult ? (
+        <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {analyzeResult}
         </div>
       ) : null}
 
-      <h2 className="mb-4 text-lg font-semibold">Video Analyses</h2>
-      {analyses.length === 0 ? (
-        <p className="text-muted-foreground">
-          No video analyses yet. Click &quot;Analyze All Videos&quot; to run the Content Analyst.
-        </p>
+      {!page ? (
+        <p className="text-muted-foreground">Loading…</p>
       ) : (
-        <div className="space-y-4">
-          {analyses.map((a) => {
-            const payload = a.payload as {
-              video?: { title?: string; video_id?: string; content_category?: string };
-              performance?: { views?: number; likes?: number };
-              engagement?: { engagement_rate?: number };
-              quality_scores?: { overall_content_health?: { score?: number } };
-              summary?: string;
-            };
-            return (
-              <Card key={a.id}>
+        <>
+          <Card className={`mb-8 ${ready ? "border-emerald-200" : "border-amber-200"}`}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Metrics readiness</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p>
+                {ready
+                  ? "All videos have required metrics. Account-level analytics and bulk analysis are enabled."
+                  : `Complete required metrics (views, likes, comments, shares, saves) for all videos before account analytics. ${page.readiness.complete_videos}/${page.readiness.total_videos} complete.`}
+              </p>
+              {!ready && page.readiness.incomplete_videos.length > 0 ? (
+                <ul className="list-inside list-disc text-muted-foreground">
+                  {page.readiness.incomplete_videos.slice(0, 5).map((v) => (
+                    <li key={v.video_id}>
+                      {v.title} — missing: {v.missing_required.join(", ")}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {page.readiness.optional_recommended_for.length > 0 ? (
+                <p className="text-muted-foreground">
+                  Tip: add optional watch-time and completion-rate metrics for your best and
+                  worst performers to improve analysis quality.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          {ready ? (
+            <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+              <Card>
                 <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">
-                      {payload.video?.title ?? a.video_id}
-                    </CardTitle>
-                    <Badge variant="muted">v{a.version}</Badge>
-                  </div>
+                  <CardTitle className="text-sm text-muted-foreground">Account Health</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="flex flex-wrap gap-4 text-muted-foreground">
-                    <span>{payload.performance?.views?.toLocaleString() ?? "—"} views</span>
-                    <span>
-                      {payload.engagement?.engagement_rate
-                        ? `${(payload.engagement.engagement_rate * 100).toFixed(1)}% engagement`
-                        : null}
-                    </span>
-                    <span>
-                      Health:{" "}
-                      {payload.quality_scores?.overall_content_health?.score
-                        ? `${(payload.quality_scores.overall_content_health.score * 100).toFixed(0)}%`
-                        : "—"}
-                    </span>
-                    <Badge>{payload.video?.content_category}</Badge>
-                  </div>
-                  <p>{payload.summary}</p>
-                  <div className="text-xs text-muted-foreground">
-                    {new Date(a.created_at).toLocaleString()} · {a.provider}
+                <CardContent>
+                  <div className="text-2xl font-semibold">
+                    {(page.overview.account_health_score * 100).toFixed(0)}%
                   </div>
                 </CardContent>
               </Card>
-            );
-          })}
-        </div>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-muted-foreground">Total Videos</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-semibold">{page.overview.total_videos}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-muted-foreground">Total Views</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-semibold">
+                    {page.overview.total_views.toLocaleString()}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-muted-foreground">Analyzed</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-semibold">
+                    {page.videos.filter((v) => v.is_analyzed).length}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          ) : null}
+
+          <h2 className="mb-4 text-lg font-semibold">Videos</h2>
+          <div className="space-y-4">
+            {page.videos.map((video) => (
+              <VideoAnalyticsCard
+                key={video.video_id}
+                video={video}
+                requiredLabels={page.required_field_labels}
+                optionalLabels={page.optional_field_labels}
+                onUpdated={load}
+              />
+            ))}
+          </div>
+        </>
       )}
     </>
   );

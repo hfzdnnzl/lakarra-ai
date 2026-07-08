@@ -9,20 +9,35 @@ from sqlalchemy.orm import Session
 from ..agents import get_agent_context
 from ..agents.content_analyst import ContentAnalystAgent
 from ..config import get_settings
-from ..errors import LakarraError, MissingAccountHandleError, NotFoundError
+from ..errors import LakarraError, MetricsIncompleteError, MissingAccountHandleError, NotFoundError
 from ..models.analytics import (
     AccountOverview,
     AccountSettingsRead,
     AnalysisResponse,
+    AnalyzeAllResponse,
     CompetitorOverview,
+    ContentAnalyticsPage,
     HistoricalAnalytics,
+    MetricsReadiness,
     ReviewDecision,
     ReviewQueueItem,
+    VideoCatalogItem,
+    VideoMetricsData,
+    VideoMetricsRead,
     normalize_tiktok_handle,
 )
-from ..providers import build_internal_content_provider, build_tiktok_provider
+from ..providers import TikTokVideoData, build_internal_content_provider, build_tiktok_provider
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
+from .video_metrics import (
+    METRIC_FIELD_LABELS,
+    OPTIONAL_METRIC_FIELDS,
+    REQUIRED_METRIC_FIELDS,
+    apply_metrics_to_performance,
+    metrics_complete,
+    metrics_from_row,
+    missing_required,
+)
 
 logger = logging.getLogger("lakarra.analytics_service")
 
@@ -90,16 +105,215 @@ class AnalyticsService:
         self._analyst.set_tiktok_provider(build_tiktok_provider(handle))
         return handle
 
+    # --- Video metrics & catalog -------------------------------------------
+    def _sync_public_metrics(self, handle: str, video: TikTokVideoData) -> None:
+        existing = self.repo.get_video_metrics(video.video.video_id)
+        if existing is not None:
+            return
+        perf = video.performance
+        self.repo.upsert_video_metrics(
+            video_id=video.video.video_id,
+            tiktok_handle=handle,
+            data={
+                "views": perf.views,
+                "likes": perf.likes,
+                "comments": perf.comments,
+                "shares": perf.shares,
+                "saves": perf.saves,
+                "reach": perf.reach or None,
+                "watch_time": perf.watch_time or None,
+                "average_watch_duration": perf.average_watch_duration or None,
+                "completion_rate": perf.completion_rate or None,
+                "profile_visits": perf.profile_visits or None,
+                "followers_gained": perf.followers_gained or None,
+                "link_clicks": perf.link_clicks,
+            },
+        )
+
+    def _metrics_read(
+        self, video_id: str, row, *, priority: str = "normal"
+    ) -> VideoMetricsRead:
+        data = metrics_from_row(row)
+        missing = missing_required(data)
+        return VideoMetricsRead(
+            video_id=video_id,
+            required_complete=metrics_complete(data),
+            missing_required=missing,
+            metrics_priority=priority,
+            **{k: data.get(k) for k in REQUIRED_METRIC_FIELDS + OPTIONAL_METRIC_FIELDS},
+            user_notes=row.user_notes if row else None,
+        )
+
+    def get_metrics_readiness(self) -> MetricsReadiness:
+        handle = self._require_handle()
+        account = build_tiktok_provider(handle).get_account()
+        for video in account.videos:
+            self._sync_public_metrics(handle, video)
+        self.session.commit()
+
+        metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
+        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
+        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
+
+        incomplete: list[dict] = []
+        complete = 0
+        optional_recommended: list[str] = []
+        for video in account.videos:
+            vid = video.video.video_id
+            row = metrics_map.get(vid)
+            data = metrics_from_row(row)
+            if metrics_complete(data):
+                complete += 1
+            else:
+                incomplete.append(
+                    {
+                        "video_id": vid,
+                        "title": video.video.title,
+                        "missing_required": missing_required(data),
+                    }
+                )
+            if vid in priority_ids:
+                optional_missing = [
+                    f for f in OPTIONAL_METRIC_FIELDS if data.get(f) is None
+                ]
+                if optional_missing:
+                    optional_recommended.append(vid)
+
+        return MetricsReadiness(
+            ready=complete == len(account.videos) and len(account.videos) > 0,
+            total_videos=len(account.videos),
+            complete_videos=complete,
+            incomplete_videos=incomplete,
+            required_fields=list(REQUIRED_METRIC_FIELDS),
+            optional_fields=list(OPTIONAL_METRIC_FIELDS),
+            optional_recommended_for=optional_recommended,
+        )
+
+    def _ensure_metrics_ready(self) -> None:
+        readiness = self.get_metrics_readiness()
+        if not readiness.ready:
+            missing_titles = ", ".join(
+                v["title"][:40] for v in readiness.incomplete_videos[:5]
+            )
+            raise MetricsIncompleteError(
+                f"Complete required metrics (views, likes, comments, shares, saves) "
+                f"for all videos before running account analytics. "
+                f"Incomplete: {readiness.total_videos - readiness.complete_videos} video(s)"
+                f"{f' — e.g. {missing_titles}' if missing_titles else ''}."
+            )
+
+    def get_content_page(self) -> ContentAnalyticsPage:
+        overview = self.get_overview()
+        readiness = self.get_metrics_readiness()
+        handle = self._require_handle()
+        account = build_tiktok_provider(handle).get_account()
+        analyses = self.repo.get_latest_analyses_map()
+        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
+        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
+        metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
+
+        catalog: list[VideoCatalogItem] = []
+        for video in account.videos:
+            vid = video.video.video_id
+            priority = "high" if vid in priority_ids else "normal"
+            row = metrics_map.get(vid)
+            latest = analyses.get(vid)
+            payload = latest.payload if latest else {}
+            catalog.append(
+                VideoCatalogItem(
+                    video_id=vid,
+                    title=video.video.title,
+                    url=video.video.url,
+                    caption=video.video.caption,
+                    publish_date=video.video.publish_date,
+                    duration=video.video.duration,
+                    thumbnail=video.video.thumbnail,
+                    is_analyzed=latest is not None,
+                    analysis_version=latest.version if latest else None,
+                    analysis_id=latest.id if latest else None,
+                    analysis_summary=payload.get("summary"),
+                    metrics=self._metrics_read(vid, row, priority=priority),
+                    metrics_priority=priority,
+                )
+            )
+
+        return ContentAnalyticsPage(
+            overview=overview,
+            readiness=readiness,
+            videos=catalog,
+            required_field_labels={
+                k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
+            },
+            optional_field_labels={
+                k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
+            },
+        )
+
+    def update_video_metrics(self, video_id: str, body: VideoMetricsData) -> VideoMetricsRead:
+        handle = self._require_handle()
+        provider = build_tiktok_provider(handle)
+        if provider.get_video(video_id) is None:
+            raise NotFoundError(f"Video '{video_id}' not found on connected account.")
+
+        row = self.repo.upsert_video_metrics(
+            video_id=video_id,
+            tiktok_handle=handle,
+            data=body.model_dump(exclude_unset=True),
+        )
+        self.session.commit()
+        account = provider.get_account()
+        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
+        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
+        priority = "high" if video_id in priority_ids else "normal"
+        return self._metrics_read(video_id, row, priority=priority)
+
+    def _apply_user_metrics_to_video(self, video: TikTokVideoData) -> TikTokVideoData:
+        row = self.repo.get_video_metrics(video.video.video_id)
+        data = metrics_from_row(row)
+        if not metrics_complete(data):
+            raise MetricsIncompleteError(
+                f"Complete required metrics for video '{video.video.title}' before analyzing."
+            )
+        perf_dict = video.performance.model_dump()
+        merged = apply_metrics_to_performance(perf_dict, data)
+        video.performance = type(video.performance)(**merged)
+        return video
+
     # --- Analyze operations ------------------------------------------------
     def analyze_video(
-        self, video_id: str, *, content_id: str | None = None
+        self,
+        video_id: str,
+        *,
+        content_id: str | None = None,
+        force: bool = False,
     ) -> AnalysisResponse:
         try:
-            self._bind_tiktok_provider()
+            handle = self._bind_tiktok_provider()
+            if not force:
+                existing = self.repo.get_latest_analysis_for_video(video_id)
+                if existing is not None:
+                    return AnalysisResponse(
+                        success=True,
+                        skipped=True,
+                        skip_reason="already_analyzed",
+                        data=existing.payload,
+                        analysis_id=existing.id,
+                        version=existing.version,
+                    )
+
+            provider = build_tiktok_provider(handle)
+            video_data = provider.get_video(video_id)
+            if video_data is None:
+                raise NotFoundError(f"Video '{video_id}' not found.")
+
+            self._sync_public_metrics(handle, video_data)
+            self.session.flush()
+            video_data = self._apply_user_metrics_to_video(video_data)
+
             posted = self.content_repo.list_past_posts(exclude_id=content_id or "", limit=10)
             historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
-            result = self._analyst.analyze_video(
-                video_id, content_id=content_id, historical_context=historical
+            result = self._analyst._analyze_video_data(  # noqa: SLF001
+                video_data, historical_context=historical
             )
             version = self.repo.next_content_analysis_version(video_id)
             row = self.repo.save_content_analysis(
@@ -131,6 +345,7 @@ class AnalyticsService:
 
     def analyze_account(self) -> AnalysisResponse:
         try:
+            self._ensure_metrics_ready()
             handle = self._bind_tiktok_provider()
             result = self._analyst.analyze_account()
             version = self.repo.next_pattern_version(handle)
@@ -220,6 +435,7 @@ class AnalyticsService:
 
     def generate_trend_report(self, *, period: str = "30d") -> AnalysisResponse:
         try:
+            self._ensure_metrics_ready()
             self._bind_tiktok_provider()
             result = self._analyst.generate_trend_report(period=period)
             version = self.repo.next_trend_version(period)
@@ -253,14 +469,31 @@ class AnalyticsService:
             logger.exception("generate_trend_report.unexpected")
             return AnalysisResponse(success=False, error=str(exc), error_type="error")
 
-    def analyze_all_videos(self) -> list[AnalysisResponse]:
+    def analyze_all_videos(self) -> AnalyzeAllResponse:
         handle = self._require_handle()
+        self._ensure_metrics_ready()
         provider = build_tiktok_provider(handle)
-        results = []
+        analyzed_ids = self.repo.list_analyzed_video_ids()
+        analyzed: list[AnalysisResponse] = []
+        skipped: list[str] = []
+        errors: list[dict] = []
+
         for video_data in provider.get_account().videos:
-            resp = self.analyze_video(video_data.video.video_id)
-            results.append(resp)
-        return results
+            vid = video_data.video.video_id
+            if vid in analyzed_ids:
+                skipped.append(vid)
+                continue
+            resp = self.analyze_video(vid)
+            if resp.success and not resp.skipped:
+                analyzed.append(resp)
+            elif not resp.success:
+                errors.append({"video_id": vid, "error": resp.error, "error_type": resp.error_type})
+
+        return AnalyzeAllResponse(
+            analyzed=analyzed,
+            skipped_video_ids=skipped,
+            errors=errors,
+        )
 
     # --- Review decisions --------------------------------------------------
     def decide_review(

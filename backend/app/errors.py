@@ -67,6 +67,11 @@ class TikTokFetchError(LakarraError):
     http_status = 502
 
 
+class MetricsIncompleteError(LakarraError):
+    error_type = "metrics_incomplete"
+    http_status = 400
+
+
 _ERROR_CLASSES = [
     MissingAPIKeyError,
     LLMTimeoutError,
@@ -77,6 +82,7 @@ _ERROR_CLASSES = [
     NotFoundError,
     MissingAccountHandleError,
     TikTokFetchError,
+    MetricsIncompleteError,
 ]
 
 #: Map of ``error_type`` -> suggested HTTP status.

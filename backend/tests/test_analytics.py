@@ -98,11 +98,26 @@ class TestAnalyticsService:
 
     def test_versioning_never_overwrites(self, analytics_service: AnalyticsService):
         first = analytics_service.analyze_video("lk-002")
-        second = analytics_service.analyze_video("lk-002")
+        second = analytics_service.analyze_video("lk-002", force=True)
         assert first.success and second.success
         assert first.version == 1
         assert second.version == 2
         assert first.analysis_id != second.analysis_id
+        assert not first.skipped
+        assert not second.skipped
+
+    def test_analyze_skips_already_analyzed(self, analytics_service: AnalyticsService):
+        first = analytics_service.analyze_video("lk-003")
+        second = analytics_service.analyze_video("lk-003")
+        assert first.success and not first.skipped
+        assert second.success and second.skipped
+        assert second.skip_reason == "already_analyzed"
+
+    def test_analyze_all_skips_analyzed(self, analytics_service: AnalyticsService):
+        analytics_service.analyze_video("lk-001")
+        result = analytics_service.analyze_all_videos()
+        assert "lk-001" in result.skipped_video_ids
+        assert len(result.analyzed) >= 1
 
     def test_analyze_competitor_persists(self, analytics_service: AnalyticsService):
         resp = analytics_service.analyze_competitor("greenvelope")
@@ -174,7 +189,28 @@ class TestAnalyticsAPI:
       assert resp.status_code == 200
       assert resp.json()["success"] is True
 
-  def test_historical_endpoint(self, client: TestClient):
+  def test_content_page_endpoint(self, client: TestClient):
+      resp = client.get("/api/analytics/content")
+      assert resp.status_code == 200
+      data = resp.json()
+      assert "videos" in data
+      assert "readiness" in data
+      assert len(data["videos"]) == 5
+
+  def test_update_video_metrics_endpoint(self, client: TestClient):
+      resp = client.put(
+          "/api/analytics/videos/lk-001/metrics",
+          json={"views": 50000, "likes": 1000, "comments": 50, "shares": 20, "saves": 80},
+      )
+      assert resp.status_code == 200
+      assert resp.json()["required_complete"] is True
+
+  def test_analyze_all_skips_endpoint(self, client: TestClient):
+      client.post("/api/analytics/videos/lk-001/analyze")
+      resp = client.post("/api/analytics/videos/analyze-all")
+      assert resp.status_code == 200
+      data = resp.json()
+      assert "lk-001" in data["skipped_video_ids"]
       resp = client.get("/api/analytics/historical")
       assert resp.status_code == 200
       data = resp.json()

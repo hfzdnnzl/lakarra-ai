@@ -342,6 +342,8 @@ class AnalysisResponse(BaseModel):
     version: int | None = None
     error: str | None = None
     error_type: str | None = None
+    skipped: bool = False
+    skip_reason: str | None = None
 
 
 class AccountSettingsRead(BaseModel):
@@ -360,3 +362,66 @@ class AccountSettingsUpdate(BaseModel):
         if not normalized:
             raise ValueError("TikTok handle cannot be empty.")
         return normalized
+
+
+class VideoMetricsData(BaseModel):
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    shares: int | None = None
+    saves: int | None = None
+    reach: int | None = None
+    watch_time: float | None = None
+    average_watch_duration: float | None = None
+    completion_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    profile_visits: int | None = None
+    followers_gained: int | None = None
+    link_clicks: int | None = None
+    user_notes: str | None = None
+
+
+class VideoMetricsRead(VideoMetricsData):
+    video_id: str
+    required_complete: bool = False
+    missing_required: list[str] = Field(default_factory=list)
+    metrics_priority: str = "normal"  # "high" for best/worst performers
+
+
+class VideoCatalogItem(BaseModel):
+    video_id: str
+    title: str
+    url: str = ""
+    caption: str = ""
+    publish_date: str = ""
+    duration: int = 0
+    thumbnail: str = ""
+    is_analyzed: bool = False
+    analysis_version: int | None = None
+    analysis_id: str | None = None
+    analysis_summary: str | None = None
+    metrics: VideoMetricsRead
+    metrics_priority: str = "normal"
+
+
+class MetricsReadiness(BaseModel):
+    ready: bool = False
+    total_videos: int = 0
+    complete_videos: int = 0
+    incomplete_videos: list[dict] = Field(default_factory=list)
+    required_fields: list[str] = Field(default_factory=list)
+    optional_fields: list[str] = Field(default_factory=list)
+    optional_recommended_for: list[str] = Field(default_factory=list)
+
+
+class ContentAnalyticsPage(BaseModel):
+    overview: AccountOverview
+    readiness: MetricsReadiness
+    videos: list[VideoCatalogItem] = Field(default_factory=list)
+    required_field_labels: dict[str, str] = Field(default_factory=dict)
+    optional_field_labels: dict[str, str] = Field(default_factory=dict)
+
+
+class AnalyzeAllResponse(BaseModel):
+    analyzed: list[AnalysisResponse] = Field(default_factory=list)
+    skipped_video_ids: list[str] = Field(default_factory=list)
+    errors: list[dict] = Field(default_factory=list)

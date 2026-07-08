@@ -16,6 +16,7 @@ from ..models.db import (
     PatternAnalysisORM,
     ReviewReportORM,
     TrendReportORM,
+    VideoMetricsORM,
 )
 
 
@@ -87,6 +88,53 @@ class AnalyticsRepository:
 
     def get_content_analysis(self, analysis_id: str) -> ContentAnalysisORM | None:
         return self.session.get(ContentAnalysisORM, analysis_id)
+
+    def get_latest_analysis_for_video(self, video_id: str) -> ContentAnalysisORM | None:
+        stmt = (
+            select(ContentAnalysisORM)
+            .where(ContentAnalysisORM.video_id == video_id)
+            .order_by(ContentAnalysisORM.version.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
+
+    def list_analyzed_video_ids(self) -> set[str]:
+        stmt = select(ContentAnalysisORM.video_id).distinct()
+        return set(self.session.scalars(stmt))
+
+    def get_latest_analyses_map(self) -> dict[str, ContentAnalysisORM]:
+        rows = self.list_content_analyses(limit=500)
+        latest: dict[str, ContentAnalysisORM] = {}
+        for row in rows:
+            if row.video_id not in latest:
+                latest[row.video_id] = row
+        return latest
+
+    # --- Video metrics (user-editable) -------------------------------------
+    def get_video_metrics(self, video_id: str) -> VideoMetricsORM | None:
+        stmt = select(VideoMetricsORM).where(VideoMetricsORM.video_id == video_id)
+        return self.session.scalar(stmt)
+
+    def upsert_video_metrics(
+        self,
+        *,
+        video_id: str,
+        tiktok_handle: str,
+        data: dict,
+    ) -> VideoMetricsORM:
+        row = self.get_video_metrics(video_id)
+        if row is None:
+            row = VideoMetricsORM(id=_new_id(), video_id=video_id, tiktok_handle=tiktok_handle)
+            self.session.add(row)
+        for key, value in data.items():
+            if hasattr(row, key):
+                setattr(row, key, value)
+        row.tiktok_handle = tiktok_handle
+        return row
+
+    def list_video_metrics(self, *, tiktok_handle: str) -> list[VideoMetricsORM]:
+        stmt = select(VideoMetricsORM).where(VideoMetricsORM.tiktok_handle == tiktok_handle)
+        return list(self.session.scalars(stmt))
 
     # --- Competitor Analysis -----------------------------------------------
     def save_competitor_analysis(

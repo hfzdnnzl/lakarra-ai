@@ -127,9 +127,18 @@ export const api = {
       body: JSON.stringify({ tiktok_handle }),
     }),
   analyticsOverview: () => request<import("@/types").AccountOverview>("/analytics/overview"),
-  analyticsContent: () =>
-    request<{ overview: import("@/types").AccountOverview; analyses: import("@/types").ContentAnalysisRecord[] }>(
-      "/analytics/content",
+  analyticsContent: () => request<import("@/types").ContentAnalyticsPage>("/analytics/content"),
+  analyticsMetricsReadiness: () =>
+    request<import("@/types").MetricsReadiness>("/analytics/metrics/readiness"),
+  updateVideoMetrics: (video_id: string, body: Record<string, unknown>) =>
+    request<import("@/types").VideoMetrics>(`/analytics/videos/${video_id}/metrics`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  analyzeVideoById: (video_id: string, force = false) =>
+    request<import("@/types").AnalysisResponse>(
+      `/analytics/videos/${video_id}/analyze?force=${force}`,
+      { method: "POST" },
     ),
   analyticsCompetitors: () => request<import("@/types").CompetitorOverview>("/analytics/competitors"),
   analyticsTrends: () =>
@@ -144,7 +153,7 @@ export const api = {
       body: JSON.stringify({ video_id, content_id }),
     }),
   analyzeAllVideos: () =>
-    request<import("@/types").AnalysisResponse[]>("/analytics/videos/analyze-all", {
+    request<import("@/types").AnalyzeAllResponse>("/analytics/videos/analyze-all", {
       method: "POST",
     }),
   analyzeCompetitor: (handle: string) =>
