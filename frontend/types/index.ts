@@ -145,6 +145,8 @@ export interface ContentDetail {
   business_goal: string;
   target_audience: string;
   product: string;
+  constraints: string[];
+  performance_notes?: string | null;
   hook: string;
   duration: number;
   caption: string;
@@ -207,3 +209,50 @@ export const CONTENT_CATEGORIES = [
   "behind_the_scenes",
   "trend_adaptation",
 ] as const;
+
+export interface ContentAsset {
+  id: string;
+  content_id: string;
+  mime_type: string;
+  file_size: number;
+  original_filename: string;
+  created_at: string;
+}
+
+export interface FidelityReview {
+  overall_match_score: number;
+  hook_match: string;
+  scene_notes: string[];
+  voiceover_usage: string;
+  cta_present: boolean;
+  suggestions: string[];
+  summary: string;
+}
+
+export interface PerformanceReview {
+  hook_strength: number;
+  emotional_triggers: string[];
+  pattern_match: string;
+  compared_to_past_posts: string[];
+  posting_recommendation: string;
+  confidence: number;
+  summary: string;
+}
+
+export interface ContentReview {
+  id: string;
+  content_id: string;
+  asset_id: string | null;
+  review_type: "fidelity" | "performance";
+  agent: string;
+  payload: FidelityReview | PerformanceReview;
+  created_at: string;
+}
+
+export interface ReviewRunResponse {
+  success: boolean;
+  fidelity?: FidelityReview | null;
+  performance?: PerformanceReview | null;
+  error?: string | null;
+  error_type?: string | null;
+}

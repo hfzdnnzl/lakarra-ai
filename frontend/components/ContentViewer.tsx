@@ -1,15 +1,23 @@
 import { Badge } from "@/components/ui/badge";
 import { TimelineViewer } from "@/components/TimelineViewer";
+import {
+  VoiceoverScriptPanel,
+  voiceoverFromScenes,
+} from "@/components/VoiceoverScriptPanel";
 import type { ContentDetail } from "@/types";
 
 /** Renders the persisted content output (hook, storyboard timeline, caption...). */
 export function ContentViewer({ content }: { content: ContentDetail }) {
+  const voiceoverLines = voiceoverFromScenes(content.scenes);
+
   return (
     <div className="space-y-5">
       <div>
         <div className="text-xs uppercase tracking-wide text-muted-foreground">Hook</div>
         <p className="font-medium">{content.hook}</p>
       </div>
+
+      <VoiceoverScriptPanel lines={voiceoverLines} />
 
       <div>
         <div className="mb-2 text-sm font-semibold">Timeline / Storyboard</div>

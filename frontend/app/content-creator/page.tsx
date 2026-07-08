@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Sparkles, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { DEFAULT_BRIEF, loadBrief, saveBrief } from "@/lib/content-brief";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -12,52 +13,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
-import type { GeneratedContent, TimelineScene } from "@/types";
-
-function SceneRow({ scene, index }: { scene: TimelineScene; index: number }) {
-  const [open, setOpen] = useState(index === 0);
-  const rows: [string, string | null | undefined][] = [
-    ["Scene", scene.scene],
-    ["Camera", scene.camera],
-    ["On-screen text", scene.text],
-    ["Voiceover", scene.voiceover],
-    ["Sound effect", scene.sound_effect],
-  ];
-  return (
-    <div className="rounded-md border border-border">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted"
-      >
-        <div className="flex items-center gap-3">
-          {open ? (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          )}
-          <span className="font-mono text-sm font-medium">
-            {scene.start} – {scene.end} sec
-          </span>
-          <span className="text-sm text-muted-foreground">{scene.scene}</span>
-        </div>
-      </button>
-      {open ? (
-        <dl className="space-y-2 border-t border-border px-4 py-3 text-sm">
-          {rows
-            .filter(([, value]) => value)
-            .map(([label, value]) => (
-              <div key={label} className="grid grid-cols-[140px_1fr] gap-2">
-                <dt className="text-muted-foreground">{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-        </dl>
-      ) : null}
-    </div>
-  );
-}
+import {
+  VoiceoverScriptPanel,
+  voiceoverFromTimeline,
+} from "@/components/VoiceoverScriptPanel";
+import { TimelineViewer } from "@/components/TimelineViewer";
+import type { GeneratedContent } from "@/types";
 
 function Result({ data }: { data: GeneratedContent }) {
+  const voiceoverLines = voiceoverFromTimeline(data.timeline);
+
   return (
     <Card>
       <CardHeader>
@@ -90,13 +55,23 @@ function Result({ data }: { data: GeneratedContent }) {
           </div>
         </div>
 
+        <VoiceoverScriptPanel lines={voiceoverLines} />
+
         <div>
           <div className="mb-2 text-sm font-semibold">Timeline</div>
-          <div className="space-y-2">
-            {data.timeline.map((scene, i) => (
-              <SceneRow key={`${scene.start}-${scene.end}-${i}`} scene={scene} index={i} />
-            ))}
-          </div>
+          <TimelineViewer
+            scenes={data.timeline.map((scene, index) => ({
+              id: `${scene.start}-${scene.end}-${index}`,
+              sequence_number: index + 1,
+              start_time: scene.start,
+              end_time: scene.end,
+              scene_description: scene.scene,
+              camera_direction: scene.camera,
+              on_screen_text: scene.text,
+              voiceover: scene.voiceover,
+              sound_effect: scene.sound_effect,
+            }))}
+          />
         </div>
 
         {data.music_suggestion ? (
@@ -129,14 +104,26 @@ function Result({ data }: { data: GeneratedContent }) {
 }
 
 export default function ContentCreatorPage() {
-  const [businessGoal, setBusinessGoal] = useState("Increase engagement");
-  const [targetAudience, setTargetAudience] = useState("Malaysian couples aged 23-35");
-  const [product, setProduct] = useState("Digital Wedding Invitation");
-  const [constraints, setConstraints] = useState("Simple aesthetic\nLess than 15 seconds");
+  const [businessGoal, setBusinessGoal] = useState(DEFAULT_BRIEF.businessGoal);
+  const [targetAudience, setTargetAudience] = useState(DEFAULT_BRIEF.targetAudience);
+  const [product, setProduct] = useState(DEFAULT_BRIEF.product);
+  const [constraints, setConstraints] = useState(DEFAULT_BRIEF.constraints);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GeneratedContent | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const saved = loadBrief();
+    setBusinessGoal(saved.businessGoal);
+    setTargetAudience(saved.targetAudience);
+    setProduct(saved.product);
+    setConstraints(saved.constraints);
+  }, []);
+
+  useEffect(() => {
+    saveBrief({ businessGoal, targetAudience, product, constraints });
+  }, [businessGoal, targetAudience, product, constraints]);
 
   const generate = async () => {
     setLoading(true);

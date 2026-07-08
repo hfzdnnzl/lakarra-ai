@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     # --- Scheduler ---------------------------------------------------------
     scheduler_enabled: bool = False
 
+    # --- Video analysis (upload review) ------------------------------------
+    video_analysis_provider: Literal["mock", "gemini", "openai"] = "mock"
+    video_analysis_model: str = "gemini-2.0-flash"
+    max_upload_bytes: int = 52_428_800  # 50 MB
+    allowed_upload_mime_types: list[str] = Field(
+        default_factory=lambda: ["video/mp4", "video/quicktime", "video/webm"]
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

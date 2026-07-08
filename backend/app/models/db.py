@@ -127,6 +127,8 @@ class Content(TimestampMixin, Base):
     music_suggestion: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
     active_version: Mapped[int] = mapped_column(Integer, default=1)
+    constraints: Mapped[list] = mapped_column(JSON, default=list)
+    performance_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     scenes: Mapped[list[ContentScene]] = relationship(
         back_populates="content",
@@ -137,6 +139,16 @@ class Content(TimestampMixin, Base):
         back_populates="content",
         cascade="all, delete-orphan",
         order_by="ContentVersion.version_number",
+    )
+    assets: Mapped[list[ContentAsset]] = relationship(
+        back_populates="content",
+        cascade="all, delete-orphan",
+        order_by="ContentAsset.created_at",
+    )
+    reviews: Mapped[list[ContentReview]] = relationship(
+        back_populates="content",
+        cascade="all, delete-orphan",
+        order_by="ContentReview.created_at",
     )
 
 
@@ -207,6 +219,44 @@ class ContentFeedback(Base):
     message: Mapped[str] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(String(64), default="user")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class ContentAsset(Base):
+    """Uploaded media (e.g. filmed video) attached to a content item."""
+
+    __tablename__ = "content_assets"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    content_id: Mapped[str] = mapped_column(
+        ForeignKey("contents.id", ondelete="CASCADE"), index=True
+    )
+    storage_key: Mapped[str] = mapped_column(String(512))
+    mime_type: Mapped[str] = mapped_column(String(128))
+    file_size: Mapped[int] = mapped_column(Integer)
+    original_filename: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    content: Mapped[Content] = relationship(back_populates="assets")
+
+
+class ContentReview(Base):
+    """Agent review of uploaded content (fidelity or performance)."""
+
+    __tablename__ = "content_reviews"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    content_id: Mapped[str] = mapped_column(
+        ForeignKey("contents.id", ondelete="CASCADE"), index=True
+    )
+    asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("content_assets.id", ondelete="SET NULL"), nullable=True
+    )
+    review_type: Mapped[str] = mapped_column(String(32))
+    agent: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    content: Mapped[Content] = relationship(back_populates="reviews")
 
 
 class ContentGeneration(Base):

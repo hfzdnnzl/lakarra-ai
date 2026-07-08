@@ -203,3 +203,46 @@ def test_api_library_and_detail_and_status_and_feedback() -> None:
 def test_api_detail_404() -> None:
     resp = client.get("/api/content/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_constraints_persisted(db_session) -> None:
+    service = scripted_service(db_session, [json.dumps(_plan("Hook constraints"))])
+    resp = service.generate(
+        ContentRequest(
+            business_goal="Increase engagement",
+            constraints=["Simple aesthetic", "Less than 15 seconds"],
+        )
+    )
+    content = service.get(resp.content_id)
+    assert content is not None
+    assert content.constraints == ["Simple aesthetic", "Less than 15 seconds"]
+
+
+def test_upload_and_review_flow(db_session) -> None:
+    service = scripted_service(db_session, [json.dumps(_plan("Hook upload"))])
+    resp = service.generate(ContentRequest(business_goal="Grow reach"))
+    content_id = resp.content_id
+    assert content_id
+
+    asset = service.upload_asset(
+        content_id,
+        data=b"fake-video-bytes",
+        mime_type="video/mp4",
+        original_filename="take1.mp4",
+    )
+    assert asset is not None
+    assert asset.original_filename == "take1.mp4"
+
+    review = service.run_review(content_id, asset_id=asset.id)
+    assert review.success
+    assert review.fidelity is not None
+    assert review.performance is not None
+
+    reviews = service.list_reviews(content_id)
+    assert len(reviews) == 2
+    types = {r.review_type for r in reviews}
+    assert types == {"fidelity", "performance"}
+
+    content = service.get(content_id)
+    assert content is not None
+    assert content.status == "analyzed"

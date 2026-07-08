@@ -55,6 +55,10 @@ class TimelineScene(BaseModel):
     def _check_bounds(self) -> TimelineScene:
         if self.end <= self.start:
             raise ValueError(f"Scene end ({self.end}) must be greater than start ({self.start}).")
+        if self.voiceover is not None and not self.voiceover.strip():
+            self.voiceover = None
+        if self.sound_effect is not None and not self.sound_effect.strip():
+            self.sound_effect = None
         return self
 
 
@@ -163,6 +167,8 @@ class ContentRead(BaseModel):
     business_goal: str
     target_audience: str
     product: str
+    constraints: list[str] = Field(default_factory=list)
+    performance_notes: str | None = None
     hook: str
     duration: int
     caption: str
@@ -238,3 +244,62 @@ class StatusUpdateRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     message: str = Field(min_length=1)
     created_by: str = "user"
+
+
+class PerformanceNotesRequest(BaseModel):
+    performance_notes: str = Field(default="")
+
+
+class ContentAssetRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    content_id: str
+    mime_type: str
+    file_size: int
+    original_filename: str
+    created_at: datetime
+
+
+class FidelityReviewPayload(BaseModel):
+    """Structured plan-fidelity review from the Content Creator agent."""
+
+    overall_match_score: float = Field(ge=0.0, le=1.0)
+    hook_match: str
+    scene_notes: list[str] = Field(default_factory=list)
+    voiceover_usage: str
+    cta_present: bool
+    suggestions: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class PerformanceReviewPayload(BaseModel):
+    """Structured performance outlook from the Content Analyst agent."""
+
+    hook_strength: float = Field(ge=0.0, le=1.0)
+    emotional_triggers: list[str] = Field(default_factory=list)
+    pattern_match: str
+    compared_to_past_posts: list[str] = Field(default_factory=list)
+    posting_recommendation: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    summary: str
+
+
+class ContentReviewRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    content_id: str
+    asset_id: str | None
+    review_type: str
+    agent: str
+    payload: dict
+    created_at: datetime
+
+
+class ReviewResponse(BaseModel):
+    success: bool
+    fidelity: FidelityReviewPayload | None = None
+    performance: PerformanceReviewPayload | None = None
+    error: str | None = None
+    error_type: str | None = None

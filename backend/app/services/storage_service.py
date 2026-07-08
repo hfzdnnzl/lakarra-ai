@@ -35,6 +35,15 @@ class StorageService(ABC):
     @abstractmethod
     def delete(self, key: str) -> None: ...
 
+    @abstractmethod
+    def read_object(self, key: str) -> bytes:
+        """Return the raw bytes stored under ``key``."""
+
+    def get_local_path(self, key: str) -> Path | None:
+        """Return a filesystem path when the backend supports direct file access."""
+
+        return None
+
 
 class LocalStorageService(StorageService):
     """Filesystem-backed storage for local development."""
@@ -51,10 +60,10 @@ class LocalStorageService(StorageService):
     def put_object(self, key: str, data: bytes, content_type: str | None = None) -> str:
         path = self._path(key)
         path.write_bytes(data)
-        return path.as_uri()
+        return path.resolve().as_uri()
 
     def get_url(self, key: str) -> str:
-        return self._path(key).as_uri()
+        return self._path(key).resolve().as_uri()
 
     def exists(self, key: str) -> bool:
         return self._path(key).exists()
@@ -63,6 +72,13 @@ class LocalStorageService(StorageService):
         path = self._path(key)
         if path.exists():
             path.unlink()
+
+    def read_object(self, key: str) -> bytes:
+        return self._path(key).read_bytes()
+
+    def get_local_path(self, key: str) -> Path | None:
+        path = self._path(key).resolve()
+        return path if path.exists() else None
 
 
 class S3StorageService(StorageService):
@@ -113,6 +129,10 @@ class S3StorageService(StorageService):
 
     def delete(self, key: str) -> None:  # pragma: no cover
         self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def read_object(self, key: str) -> bytes:  # pragma: no cover
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return response["Body"].read()
 
 
 def build_storage_service() -> StorageService:

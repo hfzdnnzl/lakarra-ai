@@ -8,14 +8,16 @@ from __future__ import annotations
 
 from math import ceil
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...errors import status_for
 from ...models.content import (
+    ContentAssetRead,
     ContentRead,
+    ContentReviewRead,
     ContentSummary,
     ContentVersionRead,
     FeedbackRead,
@@ -23,10 +25,13 @@ from ...models.content import (
     GenerateRequest,
     GenerationRead,
     PaginatedContents,
+    PerformanceNotesRequest,
+    ReviewResponse,
     StatusHistoryRead,
     StatusUpdateRequest,
 )
 from ...services.content_service import ContentService
+from ...services.storage_service import get_storage
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -163,3 +168,84 @@ def list_generations(
 ) -> list[GenerationRead]:
     _get_or_404(service, content_id)
     return [GenerationRead.model_validate(g) for g in service.generations(content_id)]
+
+
+# --- assets / upload -------------------------------------------------------
+@router.get("/{content_id}/assets", response_model=list[ContentAssetRead])
+def list_assets(
+    content_id: str, service: ContentService = Depends(_service)
+) -> list[ContentAssetRead]:
+    _get_or_404(service, content_id)
+    return [ContentAssetRead.model_validate(a) for a in service.list_assets(content_id)]
+
+
+@router.post("/{content_id}/assets", response_model=ContentAssetRead, status_code=201)
+async def upload_asset(
+    content_id: str,
+    file: UploadFile = File(...),
+    service: ContentService = Depends(_service),
+) -> ContentAssetRead:
+    _get_or_404(service, content_id)
+    data = await file.read()
+    mime = file.content_type or "application/octet-stream"
+    try:
+        asset = service.upload_asset(
+            content_id,
+            data=data,
+            mime_type=mime,
+            original_filename=file.filename or "upload.mp4",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return ContentAssetRead.model_validate(asset)
+
+
+@router.get("/{content_id}/assets/{asset_id}/stream")
+def stream_asset(
+    content_id: str, asset_id: str, service: ContentService = Depends(_service)
+):
+    _get_or_404(service, content_id)
+    asset = service.get_asset(asset_id)
+    if asset is None or asset.content_id != content_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    local_path = get_storage().get_local_path(asset.storage_key)
+    if local_path is None:
+        raise HTTPException(status_code=404, detail="Asset file not available locally")
+    return FileResponse(local_path, media_type=asset.mime_type, filename=asset.original_filename)
+
+
+# --- review ----------------------------------------------------------------
+@router.post("/{content_id}/review", response_model=ReviewResponse)
+def run_review(
+    content_id: str,
+    asset_id: str = Query(..., description="Uploaded asset to review"),
+    service: ContentService = Depends(_service),
+) -> ReviewResponse:
+    _get_or_404(service, content_id)
+    response = service.run_review(content_id, asset_id=asset_id)
+    if not response.success and response.error_type == "not_found":
+        raise HTTPException(status_code=404, detail=response.error or "Not found")
+    return response
+
+
+@router.get("/{content_id}/reviews", response_model=list[ContentReviewRead])
+def list_reviews(
+    content_id: str, service: ContentService = Depends(_service)
+) -> list[ContentReviewRead]:
+    _get_or_404(service, content_id)
+    return [ContentReviewRead.model_validate(r) for r in service.list_reviews(content_id)]
+
+
+# --- performance notes (past post context) ---------------------------------
+@router.patch("/{content_id}/performance-notes", response_model=ContentRead)
+def update_performance_notes(
+    content_id: str,
+    body: PerformanceNotesRequest,
+    service: ContentService = Depends(_service),
+) -> ContentRead:
+    content = service.update_performance_notes(content_id, body.performance_notes)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return ContentRead.model_validate(content)

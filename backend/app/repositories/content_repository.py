@@ -15,8 +15,10 @@ from sqlalchemy.orm import Session
 from ..models.content import ContentIdea
 from ..models.db import (
     Content,
+    ContentAsset,
     ContentFeedback,
     ContentGeneration,
+    ContentReview,
     ContentScene,
     ContentStatusHistory,
     ContentVersion,
@@ -57,6 +59,13 @@ class ContentRepository:
         content.scenes.clear()
         self.session.flush()
         for i, scene in enumerate(idea.timeline, start=1):
+            vo = scene.voiceover
+            voiceover = vo.strip() if vo and vo.strip() else None
+            sound_effect = (
+                scene.sound_effect.strip()
+                if scene.sound_effect and scene.sound_effect.strip()
+                else None
+            )
             content.scenes.append(
                 ContentScene(
                     id=_new_id(),
@@ -66,8 +75,8 @@ class ContentRepository:
                     scene_description=scene.scene,
                     camera_direction=scene.camera,
                     on_screen_text=scene.text,
-                    voiceover=scene.voiceover,
-                    sound_effect=scene.sound_effect,
+                    voiceover=voiceover,
+                    sound_effect=sound_effect,
                 )
             )
 
@@ -92,6 +101,7 @@ class ContentRepository:
         business_goal: str,
         target_audience: str,
         product: str,
+        constraints: list[str],
         meta: GenerationMeta,
     ) -> Content:
         content = Content(
@@ -99,6 +109,7 @@ class ContentRepository:
             business_goal=business_goal,
             target_audience=target_audience or idea.target_audience,
             product=product,
+            constraints=list(constraints),
             status="draft",
             active_version=1,
         )
@@ -130,7 +141,25 @@ class ContentRepository:
         self.session.flush()
         return content
 
-    def add_version(self, content: Content, *, idea: ContentIdea, meta: GenerationMeta) -> Content:
+    def add_version(
+        self,
+        content: Content,
+        *,
+        idea: ContentIdea,
+        meta: GenerationMeta,
+        business_goal: str | None = None,
+        target_audience: str | None = None,
+        product: str | None = None,
+        constraints: list[str] | None = None,
+    ) -> Content:
+        if business_goal is not None:
+            content.business_goal = business_goal
+        if target_audience is not None:
+            content.target_audience = target_audience or idea.target_audience
+        if product is not None:
+            content.product = product
+        if constraints is not None:
+            content.constraints = list(constraints)
         next_number = max((v.version_number for v in content.versions), default=0) + 1
         for version in content.versions:
             version.is_active = False
@@ -261,3 +290,79 @@ class ContentRepository:
         self.session.add(feedback)
         self.session.flush()
         return feedback
+
+    def update_performance_notes(self, content: Content, notes: str) -> Content:
+        content.performance_notes = notes.strip() or None
+        self.session.flush()
+        return content
+
+    def add_asset(
+        self,
+        content_id: str,
+        *,
+        storage_key: str,
+        mime_type: str,
+        file_size: int,
+        original_filename: str,
+    ) -> ContentAsset:
+        asset = ContentAsset(
+            id=_new_id(),
+            content_id=content_id,
+            storage_key=storage_key,
+            mime_type=mime_type,
+            file_size=file_size,
+            original_filename=original_filename,
+        )
+        self.session.add(asset)
+        self.session.flush()
+        return asset
+
+    def get_asset(self, asset_id: str) -> ContentAsset | None:
+        return self.session.get(ContentAsset, asset_id)
+
+    def list_assets(self, content_id: str) -> list[ContentAsset]:
+        stmt = (
+            select(ContentAsset)
+            .where(ContentAsset.content_id == content_id)
+            .order_by(ContentAsset.created_at.desc())
+        )
+        return list(self.session.scalars(stmt).all())
+
+    def add_review(
+        self,
+        content_id: str,
+        *,
+        review_type: str,
+        agent: str,
+        payload: dict,
+        asset_id: str | None = None,
+    ) -> ContentReview:
+        review = ContentReview(
+            id=_new_id(),
+            content_id=content_id,
+            asset_id=asset_id,
+            review_type=review_type,
+            agent=agent,
+            payload=payload,
+        )
+        self.session.add(review)
+        self.session.flush()
+        return review
+
+    def list_reviews(self, content_id: str) -> list[ContentReview]:
+        stmt = (
+            select(ContentReview)
+            .where(ContentReview.content_id == content_id)
+            .order_by(ContentReview.created_at.desc())
+        )
+        return list(self.session.scalars(stmt).all())
+
+    def list_past_posts(self, *, exclude_id: str, limit: int = 10) -> list[Content]:
+        stmt = (
+            select(Content)
+            .where(Content.id != exclude_id)
+            .where(Content.status.in_(["posted", "analyzed", "promoted"]))
+            .order_by(Content.updated_at.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(stmt).all())

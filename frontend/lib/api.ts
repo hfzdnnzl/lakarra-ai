@@ -87,4 +87,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+  uploadContentAsset: async (contentId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_URL}/content/${contentId}/assets`, {
+      method: "POST",
+      body: form,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+      throw new Error(body?.detail ?? `Upload failed (${res.status})`);
+    }
+    return res.json() as Promise<import("@/types").ContentAsset>;
+  },
+  contentAssets: (id: string) =>
+    request<import("@/types").ContentAsset[]>(`/content/${id}/assets`),
+  contentAssetStreamUrl: (contentId: string, assetId: string) =>
+    `${API_URL}/content/${contentId}/assets/${assetId}/stream`,
+  runContentReview: (contentId: string, assetId: string) =>
+    request<import("@/types").ReviewRunResponse>(
+      `/content/${contentId}/review?asset_id=${encodeURIComponent(assetId)}`,
+      { method: "POST" },
+    ),
+  contentReviews: (id: string) =>
+    request<import("@/types").ContentReview[]>(`/content/${id}/reviews`),
+  updatePerformanceNotes: (id: string, performance_notes: string) =>
+    request<import("@/types").ContentDetail>(`/content/${id}/performance-notes`, {
+      method: "PATCH",
+      body: JSON.stringify({ performance_notes }),
+    }),
 };

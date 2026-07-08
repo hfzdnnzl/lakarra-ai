@@ -9,13 +9,23 @@ import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ContentViewer } from "@/components/ContentViewer";
 import { VersionHistory } from "@/components/VersionHistory";
 import { FeedbackPanel } from "@/components/FeedbackPanel";
+import { UploadPanel } from "@/components/UploadPanel";
+import { ReviewPanel } from "@/components/ReviewPanel";
 import { CONTENT_STATUSES } from "@/types";
-import type { ContentDetail, ContentVersion, Feedback } from "@/types";
+import type {
+  ContentAsset,
+  ContentDetail,
+  ContentReview,
+  ContentVersion,
+  Feedback,
+} from "@/types";
 
 const selectClass =
   "h-9 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -27,6 +37,10 @@ export default function ContentDetailPage() {
   const [content, setContent] = useState<ContentDetail | null>(null);
   const [versions, setVersions] = useState<ContentVersion[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [assets, setAssets] = useState<ContentAsset[]>([]);
+  const [reviews, setReviews] = useState<ContentReview[]>([]);
+  const [performanceNotes, setPerformanceNotes] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyVersion, setBusyVersion] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState(false);
@@ -34,14 +48,19 @@ export default function ContentDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const [detail, vers, fb] = await Promise.all([
+      const [detail, vers, fb, assetList, reviewList] = await Promise.all([
         api.contentDetail(id),
         api.contentVersions(id),
         api.contentFeedback(id),
+        api.contentAssets(id),
+        api.contentReviews(id),
       ]);
       setContent(detail);
       setVersions(vers);
       setFeedback(fb);
+      setAssets(assetList);
+      setReviews(reviewList);
+      setPerformanceNotes(detail.performance_notes ?? "");
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -75,7 +94,7 @@ export default function ContentDetailPage() {
         business_goal: content.business_goal,
         target_audience: content.target_audience,
         product: content.product,
-        constraints: [],
+        constraints: content.constraints ?? [],
         content_id: id,
       });
       await load();
@@ -91,6 +110,16 @@ export default function ContentDetailPage() {
       await load();
     } finally {
       setSubmittingFeedback(false);
+    }
+  };
+
+  const savePerformanceNotes = async () => {
+    setSavingNotes(true);
+    try {
+      await api.updatePerformanceNotes(id, performanceNotes);
+      await load();
+    } finally {
+      setSavingNotes(false);
     }
   };
 
@@ -137,6 +166,15 @@ export default function ContentDetailPage() {
             <CardContent className="grid grid-cols-2 gap-4 text-sm">
               <Field label="Goal" value={content.business_goal} />
               <Field label="Audience" value={content.target_audience} />
+              <Field label="Product" value={content.product} />
+              <Field
+                label="Constraints"
+                value={
+                  content.constraints?.length
+                    ? content.constraints.join("; ")
+                    : "(none)"
+                }
+              />
               <Field label="Category" value={content.category} />
               <Field label="Confidence" value={`${(content.confidence_score * 100).toFixed(0)}%`} />
               <Field label="Created" value={new Date(content.created_at).toLocaleString()} />
@@ -171,6 +209,48 @@ export default function ContentDetailPage() {
         </div>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Upload & Review</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <UploadPanel contentId={id} assets={assets} onUploaded={load} />
+              <ReviewPanel
+                contentId={id}
+                assets={assets}
+                reviews={reviews}
+                onReviewed={load}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Performance notes</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="perf-notes">Notes after posting (for future analysis)</Label>
+                <Textarea
+                  id="perf-notes"
+                  value={performanceNotes}
+                  onChange={(e) => setPerformanceNotes(e.target.value)}
+                  placeholder="e.g. 12k views, strong saves, hook worked well..."
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={savingNotes}
+                onClick={savePerformanceNotes}
+              >
+                {savingNotes ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save notes
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
