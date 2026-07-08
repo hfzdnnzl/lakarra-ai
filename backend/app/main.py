@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,12 +11,30 @@ from .api import api_router
 from .config import get_settings
 
 
+def _configure_logging() -> None:
+    """Ensure application logs are emitted (works under uvicorn and pytest)."""
+
+    lakarra_logger = logging.getLogger("lakarra")
+    lakarra_logger.setLevel(logging.INFO)
+    if not logging.getLogger().handlers and not lakarra_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+        lakarra_logger.addHandler(handler)
+
+
 def create_app() -> FastAPI:
+    _configure_logging()
     settings = get_settings()
+
+    if settings.auto_init_db:
+        from .database import init_db
+
+        init_db()
+
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        description="Multi-agent AI operating system for the Lakarra business (Phase 1 scaffold).",
+        description="Multi-agent AI operating system for the Lakarra business.",
     )
 
     app.add_middleware(

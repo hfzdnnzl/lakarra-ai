@@ -46,3 +46,24 @@ See `README.md` for the full architecture and standard run/lint/test commands.
 - **Adding an agent (no edits to existing agents):** create
   `backend/app/agents/<name>/agent.py` with a class decorated by `@register_agent`,
   then import it in `backend/app/agents/__init__.py`.
+- **Prompts are file-based, never hardcoded.** They live in
+  `backend/prompts/<agent>/{system,user}.md` and are loaded via
+  `app/services/prompts.py` (each template gets a content-hash `version` for logging).
+  User templates use `{{token}}` placeholders (not `str.format`) so JSON braces in
+  the prompt are preserved.
+- **Content Creator LLM:** defaults to the deterministic mock provider, which parses
+  the brief and returns a valid `ContentIdea` JSON — so `POST /api/content/generate`
+  works end-to-end with no API key. For real generation set `LLM_PROVIDER=openai`,
+  `OPENAI_API_KEY`, and `MODEL_NAME`. The agent pattern is: extend `BaseAgent`, load
+  prompts, call the LLM, then parse+validate into a Pydantic model.
+- **Content Management System (Phase 2.5) persistence:** the CMS uses SQLAlchemy via
+  `DATABASE_URL`, which defaults to a local SQLite file (`sqlite:///./lakarra.db`) so
+  it works with zero setup; point it at AWS RDS PostgreSQL in production. The schema
+  is auto-created on startup when `AUTO_INIT_DB=true` (dev default); in production run
+  `alembic upgrade head` (from `backend/`) and set `AUTO_INIT_DB=false`. The dev DB
+  file is git-ignored and resets if deleted. Object storage is abstracted behind
+  `StorageService` (`STORAGE_BACKEND=local` default, or `s3` with `S3_BUCKET`); never
+  call boto3 from business logic. `POST /api/content/generate` now persists content +
+  scenes + generation metadata and returns `content_id`; pass `content_id` to create a
+  new version. CMS layering is `api/routes/content.py` → `services/content_service.py`
+  → `repositories/content_repository.py`.
