@@ -37,8 +37,6 @@ from ...services.video_analysis import build_video_analysis_service, parse_revie
 from ..base import AgentRequest, AgentResult, BaseAgent
 from ..registry import register_agent
 
-logger = logging.getLogger("lakarra.content_analyst")
-
 
 @dataclass
 class AnalysisResult:
