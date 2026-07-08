@@ -23,9 +23,14 @@ def upgrade() -> None:
 
     content_columns = {col["name"] for col in inspector.get_columns("contents")}
     if "constraints" not in content_columns:
+        json_default = (
+            sa.text("'[]'::json")
+            if bind.dialect.name == "postgresql"
+            else sa.text("'[]'")
+        )
         op.add_column(
             "contents",
-            sa.Column("constraints", sa.JSON(), nullable=False, server_default="[]"),
+            sa.Column("constraints", sa.JSON(), nullable=False, server_default=json_default),
         )
     if "performance_notes" not in content_columns:
         op.add_column("contents", sa.Column("performance_notes", sa.Text(), nullable=True))

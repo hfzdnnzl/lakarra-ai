@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -32,6 +33,13 @@ from ..repositories.content_repository import ContentRepository, GenerationMeta
 from ..services.storage_service import get_storage
 
 logger = logging.getLogger("lakarra.content_service")
+
+
+def _safe_filename(name: str) -> str:
+    """Strip path components so client filenames cannot escape the storage key."""
+
+    safe = Path(name).name.strip()
+    return safe if safe and safe not in {".", ".."} else "upload.bin"
 
 
 class ContentService:
@@ -211,7 +219,7 @@ class ContentService:
         if content is None:
             return None
 
-        storage_key = f"content/{content_id}/{uuid4().hex}_{original_filename}"
+        storage_key = f"content/{content_id}/{uuid4().hex}_{_safe_filename(original_filename)}"
         get_storage().put_object(storage_key, data, content_type=mime_type)
         asset = self.repo.add_asset(
             content_id,

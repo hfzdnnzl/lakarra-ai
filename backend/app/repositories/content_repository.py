@@ -46,6 +46,7 @@ class ContentRepository:
     def _apply_idea(self, content: Content, idea: ContentIdea) -> None:
         content.title = idea.title
         content.category = str(idea.category)
+        content.target_audience = idea.target_audience
         content.hook = idea.hook
         content.duration = idea.duration
         content.caption = idea.caption

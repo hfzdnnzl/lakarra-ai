@@ -90,14 +90,20 @@ export default function ContentDetailPage() {
     if (!content) return;
     setRegenerating(true);
     try {
-      await api.generateContent({
+      const response = await api.generateContent({
         business_goal: content.business_goal,
         target_audience: content.target_audience,
         product: content.product,
         constraints: content.constraints ?? [],
         content_id: id,
       });
+      if (!response.success) {
+        setError(response.error ?? "Regeneration failed.");
+        return;
+      }
       await load();
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setRegenerating(false);
     }

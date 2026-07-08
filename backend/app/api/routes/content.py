@@ -6,10 +6,11 @@ Controller layer only: HTTP concerns + serialization. All business logic lives i
 
 from __future__ import annotations
 
+from io import BytesIO
 from math import ceil
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -211,9 +212,19 @@ def stream_asset(
     if asset is None or asset.content_id != content_id:
         raise HTTPException(status_code=404, detail="Asset not found")
     local_path = get_storage().get_local_path(asset.storage_key)
-    if local_path is None:
-        raise HTTPException(status_code=404, detail="Asset file not available locally")
-    return FileResponse(local_path, media_type=asset.mime_type, filename=asset.original_filename)
+    if local_path is not None:
+        return FileResponse(
+            local_path, media_type=asset.mime_type, filename=asset.original_filename
+        )
+    try:
+        data = get_storage().read_object(asset.storage_key)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="Asset file not found") from exc
+    return StreamingResponse(
+        BytesIO(data),
+        media_type=asset.mime_type,
+        headers={"Content-Disposition": f'inline; filename="{asset.original_filename}"'},
+    )
 
 
 # --- review ----------------------------------------------------------------

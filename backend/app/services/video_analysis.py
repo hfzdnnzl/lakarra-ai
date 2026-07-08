@@ -186,7 +186,7 @@ class OpenAIVideoAnalysisService(VideoAnalysisService):
 
         try:
             response = client.chat.completions.create(
-                model=settings.model_name,
+                model=settings.video_analysis_model,
                 messages=[{"role": "user", "content": content_parts}],
                 response_format={"type": "json_object"},
             )

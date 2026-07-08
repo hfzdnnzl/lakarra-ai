@@ -53,7 +53,10 @@ class LocalStorageService(StorageService):
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, key: str) -> Path:
-        path = self.base_dir / key
+        path = (self.base_dir / key).resolve()
+        base = self.base_dir.resolve()
+        if base not in path.parents and path != base:
+            raise ValueError(f"Invalid storage key: {key!r}")
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
