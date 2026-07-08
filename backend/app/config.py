@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # no API keys are required for local development.
     llm_provider: Literal["mock", "openai", "anthropic", "gemini"] = "mock"
     llm_model: str = "mock-model"
+    # Model name for real providers (e.g. OpenAI). Read from MODEL_NAME.
+    model_name: str = Field(default="gpt-4o-mini", validation_alias="MODEL_NAME")
+    llm_timeout_seconds: float = 30.0
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     gemini_api_key: str | None = None

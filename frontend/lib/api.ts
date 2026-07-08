@@ -37,4 +37,20 @@ export const api = {
     }),
   approve: (id: string) => request(`/approvals/${id}/approve`, { method: "POST" }),
   reject: (id: string) => request(`/approvals/${id}/reject`, { method: "POST" }),
+  generateContent: async (
+    body: import("@/types").ContentGenerateRequest,
+  ): Promise<import("@/types").ContentGenerateResponse> => {
+    // Read the body even on non-2xx so we can surface a meaningful error message.
+    const res = await fetch(`${API_URL}/content/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    try {
+      return (await res.json()) as import("@/types").ContentGenerateResponse;
+    } catch {
+      return { success: false, error: `Request failed (HTTP ${res.status})` };
+    }
+  },
 };

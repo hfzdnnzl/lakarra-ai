@@ -73,3 +73,42 @@ export interface WorkflowRun {
   steps: { agent: string; status: string }[];
   created_at: string;
 }
+
+export interface TimelineScene {
+  start: number;
+  end: number;
+  scene: string;
+  camera: string;
+  text: string;
+  voiceover?: string | null;
+  sound_effect?: string | null;
+}
+
+export interface GeneratedContent {
+  title: string;
+  category: string;
+  target_audience: string;
+  hook: string;
+  duration: number;
+  timeline: TimelineScene[];
+  music_suggestion?: string | null;
+  caption: string;
+  hashtags: string[];
+  cta: string;
+  posting_time: string;
+  confidence: number;
+}
+
+export interface ContentGenerateRequest {
+  business_goal: string;
+  target_audience: string;
+  product: string;
+  constraints: string[];
+}
+
+export interface ContentGenerateResponse {
+  success: boolean;
+  data?: GeneratedContent | null;
+  error?: string | null;
+  error_type?: string | null;
+}
