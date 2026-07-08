@@ -35,10 +35,26 @@ class Settings(BaseSettings):
     )
 
     # --- Memory / persistence ---------------------------------------------
-    # ``in_memory`` keeps everything in process (default, zero-dependency).
+    # ``in_memory`` keeps the multi-agent shared memory in process (default).
     # ``postgres`` uses the SQLAlchemy-backed store (requires a database).
     memory_backend: Literal["in_memory", "postgres"] = "in_memory"
-    database_url: str = "postgresql+psycopg2://lakarra:lakarra@localhost:5432/lakarra"
+
+    # Content Management System database (SQLAlchemy). Defaults to a local SQLite
+    # file so the CMS works with zero setup; point DATABASE_URL at AWS RDS
+    # PostgreSQL in production (e.g. postgresql+psycopg2://user:pass@host:5432/db).
+    database_url: str = "sqlite:///./lakarra.db"
+    # Ensure the CMS schema exists on startup (dev convenience). In production run
+    # Alembic migrations instead and set this to false.
+    auto_init_db: bool = True
+
+    # --- Object storage (AWS S3 compatible) --------------------------------
+    # ``local`` writes to the filesystem (dev); ``s3`` uses AWS S3 via boto3.
+    storage_backend: Literal["local", "s3"] = "local"
+    local_storage_dir: str = "./storage"
+    s3_bucket: str | None = None
+    s3_region: str | None = None
+    # Optional custom endpoint (e.g. LocalStack / MinIO).
+    s3_endpoint_url: str | None = None
 
     # --- Cache (optional) --------------------------------------------------
     redis_url: str | None = None
@@ -57,6 +73,14 @@ class Settings(BaseSettings):
 
     # --- Scheduler ---------------------------------------------------------
     scheduler_enabled: bool = False
+
+    # --- Video analysis (upload review) ------------------------------------
+    video_analysis_provider: Literal["mock", "gemini", "openai"] = "mock"
+    video_analysis_model: str = "gemini-2.0-flash"
+    max_upload_bytes: int = 52_428_800  # 50 MB
+    allowed_upload_mime_types: list[str] = Field(
+        default_factory=lambda: ["video/mp4", "video/quicktime", "video/webm"]
+    )
 
 
 @lru_cache

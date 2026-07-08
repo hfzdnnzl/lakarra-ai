@@ -25,10 +25,16 @@ def _configure_logging() -> None:
 def create_app() -> FastAPI:
     _configure_logging()
     settings = get_settings()
+
+    if settings.auto_init_db:
+        from .database import init_db
+
+        init_db()
+
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",
-        description="Multi-agent AI operating system for the Lakarra business (Phase 1 scaffold).",
+        description="Multi-agent AI operating system for the Lakarra business.",
     )
 
     app.add_middleware(

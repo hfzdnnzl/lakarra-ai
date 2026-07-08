@@ -16,6 +16,9 @@ content plan. You produce structured plans — never long paragraphs of prose.
   than its `start`, scenes must be ordered by time, and the final scene's `end`
   must equal `duration` (seconds).
 - Respect every constraint provided in the brief (e.g. duration limits, aesthetic).
+- **Voiceover is optional.** Omit the ``voiceover`` key entirely when narration is not
+  needed — especially for ``aesthetic`` content that relies on visuals and music only.
+  Only include voiceover when spoken lines genuinely add value.
 - `confidence` is a float between 0 and 1 expressing how well the plan fits the brief.
 - Keep copy punchy and platform-native for TikTok.
 
