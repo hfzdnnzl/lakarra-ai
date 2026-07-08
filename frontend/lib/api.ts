@@ -117,4 +117,46 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ performance_notes }),
     }),
+
+  // --- Analytics (Phase 3) -------------------------------------------------
+  analyticsOverview: () => request<import("@/types").AccountOverview>("/analytics/overview"),
+  analyticsContent: () =>
+    request<{ overview: import("@/types").AccountOverview; analyses: import("@/types").ContentAnalysisRecord[] }>(
+      "/analytics/content",
+    ),
+  analyticsCompetitors: () => request<import("@/types").CompetitorOverview>("/analytics/competitors"),
+  analyticsTrends: () =>
+    request<{ reports: import("@/types").TrendReportRecord[] }>("/analytics/trends"),
+  analyticsReviewQueue: () => request<import("@/types").ReviewQueueItem[]>("/analytics/review-queue"),
+  analyticsHistorical: () => request<import("@/types").HistoricalAnalytics>("/analytics/historical"),
+  analyzeAccount: () =>
+    request<import("@/types").AnalysisResponse>("/analytics/account/analyze", { method: "POST" }),
+  analyzeVideo: (video_id: string, content_id?: string) =>
+    request<import("@/types").AnalysisResponse>("/analytics/videos/analyze", {
+      method: "POST",
+      body: JSON.stringify({ video_id, content_id }),
+    }),
+  analyzeAllVideos: () =>
+    request<import("@/types").AnalysisResponse[]>("/analytics/videos/analyze-all", {
+      method: "POST",
+    }),
+  analyzeCompetitor: (handle: string) =>
+    request<import("@/types").AnalysisResponse>("/analytics/competitors/analyze", {
+      method: "POST",
+      body: JSON.stringify({ handle }),
+    }),
+  reviewContentAnalytics: (content_id: string) =>
+    request<import("@/types").AnalysisResponse>(`/analytics/content/${content_id}/review`, {
+      method: "POST",
+    }),
+  generateTrendReport: (period = "30d") =>
+    request<import("@/types").AnalysisResponse>("/analytics/trends/generate", {
+      method: "POST",
+      body: JSON.stringify({ period }),
+    }),
+  decideReview: (report_id: string, decision: string, comment?: string) =>
+    request<import("@/types").AnalysisResponse>(`/analytics/reviews/${report_id}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, comment }),
+    }),
 };

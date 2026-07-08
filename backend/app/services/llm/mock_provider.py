@@ -148,13 +148,21 @@ class MockLLMProvider(LLMProvider):
     ) -> CompletionResult:
         user_text = "\n".join(m.content for m in messages if m.role == "user")
 
+        system_text = "\n".join(m.content for m in messages if m.role == "system")
+
         if _looks_like_content_request(user_text):
             text = _build_content_plan(user_text)
         else:
-            text = (
-                "[mock-llm] Deterministic placeholder response. "
-                f"Received {len(messages)} message(s)."
-            )
+            from ..analytics_mock import build_analyst_mock_response
+
+            analyst_text = build_analyst_mock_response(system_text, user_text)
+            if analyst_text is not None:
+                text = analyst_text
+            else:
+                text = (
+                    "[mock-llm] Deterministic placeholder response. "
+                    f"Received {len(messages)} message(s)."
+                )
 
         # Rough token estimate (~4 chars/token) for realistic usage logging.
         prompt_chars = sum(len(m.content) for m in messages)

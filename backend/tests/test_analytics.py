@@ -1,0 +1,143 @@
+"""Tests for Content Analyst Phase 3 analytics."""
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.agents import get_agent_context
+from app.agents.content_analyst import ContentAnalystAgent
+from app.main import app
+from app.providers import MockTikTokProvider, build_internal_content_provider
+from app.repositories.analytics_repository import AnalyticsRepository
+from app.services.analytics_service import AnalyticsService
+
+
+@pytest.fixture
+def analyst(db_session: Session):
+    ctx = get_agent_context()
+    agent = ContentAnalystAgent(ctx, tiktok=MockTikTokProvider())
+    agent.set_internal_provider(build_internal_content_provider(db_session))
+    return agent
+
+
+@pytest.fixture
+def analytics_service(db_session: Session, analyst: ContentAnalystAgent):
+    return AnalyticsService(db_session, analyst=analyst)
+
+
+class TestContentAnalystAgent:
+    def test_analyze_video(self, analyst: ContentAnalystAgent):
+        result = analyst.analyze_video("lk-001")
+        assert result.payload["video"]["video_id"] == "lk-001"
+        assert "engagement" in result.payload
+        assert "quality_scores" in result.payload
+
+    def test_analyze_account(self, analyst: ContentAnalystAgent):
+        result = analyst.analyze_account()
+        assert "best_performing_categories" in result.payload
+        assert result.provider == "mock"
+
+    def test_analyze_competitor(self, analyst: ContentAnalystAgent):
+        result = analyst.analyze_competitor("paperlesspost")
+        assert result.payload["account"]["handle"] == "paperlesspost"
+        assert "strengths" in result.payload
+        assert "opportunities" in result.payload
+
+    def test_generate_trend_report(self, analyst: ContentAnalystAgent):
+        result = analyst.generate_trend_report(period="30d")
+        assert result.payload["period"] == "30d"
+        assert "patterns" in result.payload
+        assert "recommendations" in result.payload
+
+    def test_analyze_all_videos(self, analyst: ContentAnalystAgent):
+        results = analyst.analyze_all_videos()
+        assert len(results) == 5
+
+
+class TestAnalyticsService:
+    def test_analyze_video_persists(self, analytics_service: AnalyticsService, db_session: Session):
+        resp = analytics_service.analyze_video("lk-001")
+        assert resp.success is True
+        assert resp.analysis_id is not None
+        assert resp.version == 1
+
+        repo = AnalyticsRepository(db_session)
+        rows = repo.list_content_analyses(video_id="lk-001")
+        assert len(rows) == 1
+
+    def test_versioning_never_overwrites(self, analytics_service: AnalyticsService):
+        first = analytics_service.analyze_video("lk-002")
+        second = analytics_service.analyze_video("lk-002")
+        assert first.success and second.success
+        assert first.version == 1
+        assert second.version == 2
+        assert first.analysis_id != second.analysis_id
+
+    def test_analyze_competitor_persists(self, analytics_service: AnalyticsService):
+        resp = analytics_service.analyze_competitor("greenvelope")
+        assert resp.success is True
+        assert resp.version == 1
+
+    def test_generate_trend_report_persists(self, analytics_service: AnalyticsService):
+        resp = analytics_service.generate_trend_report(period="30d")
+        assert resp.success is True
+        assert resp.data is not None
+
+    def test_get_overview(self, analytics_service: AnalyticsService):
+        overview = analytics_service.get_overview()
+        assert overview.total_videos == 5
+        assert overview.total_views > 0
+
+    def test_get_historical(self, analytics_service: AnalyticsService):
+        analytics_service.analyze_account()
+        historical = analytics_service.get_historical()
+        assert len(historical.pattern_analyses) >= 1
+
+
+class TestAnalyticsAPI:
+  @pytest.fixture
+  def client(self):
+      return TestClient(app)
+
+  def test_overview_endpoint(self, client: TestClient):
+      resp = client.get("/api/analytics/overview")
+      assert resp.status_code == 200
+      data = resp.json()
+      assert "total_videos" in data
+      assert data["total_videos"] == 5
+
+  def test_analyze_account_endpoint(self, client: TestClient):
+      resp = client.post("/api/analytics/account/analyze")
+      assert resp.status_code == 200
+      data = resp.json()
+      assert data["success"] is True
+
+  def test_analyze_video_endpoint(self, client: TestClient):
+      resp = client.post(
+          "/api/analytics/videos/analyze",
+          json={"video_id": "lk-001"},
+      )
+      assert resp.status_code == 200
+      assert resp.json()["success"] is True
+
+  def test_analyze_competitor_endpoint(self, client: TestClient):
+      resp = client.post(
+          "/api/analytics/competitors/analyze",
+          json={"handle": "paperlesspost"},
+      )
+      assert resp.status_code == 200
+      assert resp.json()["success"] is True
+
+  def test_historical_endpoint(self, client: TestClient):
+      resp = client.get("/api/analytics/historical")
+      assert resp.status_code == 200
+      data = resp.json()
+      assert "content_analyses" in data
+      assert "trend_reports" in data
+
+  def test_review_queue_endpoint(self, client: TestClient):
+      resp = client.get("/api/analytics/review-queue")
+      assert resp.status_code == 200
+      assert isinstance(resp.json(), list)

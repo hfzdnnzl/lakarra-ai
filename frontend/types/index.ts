@@ -256,3 +256,109 @@ export interface ReviewRunResponse {
   error?: string | null;
   error_type?: string | null;
 }
+
+// --- Analytics (Phase 3) -----------------------------------------------------
+
+export interface AccountOverview {
+  account_health_score: number;
+  total_videos: number;
+  total_views: number;
+  avg_engagement_rate: number;
+  recent_videos: Array<{
+    video_id: string;
+    title: string;
+    views: number;
+    category: string;
+    publish_date: string;
+  }>;
+  best_performers: Array<{
+    video_id: string;
+    title: string;
+    views: number;
+    engagement_rate?: number;
+  }>;
+  worst_performers: Array<{
+    video_id: string;
+    title: string;
+    views: number;
+  }>;
+  posting_heatmap: Record<string, number>;
+  performance_trends: Array<{
+    video_id: string;
+    views: number;
+    publish_date: string;
+  }>;
+  growth_trends: Array<Record<string, unknown>>;
+}
+
+export interface AnalysisRecord {
+  id: string;
+  version: number;
+  subject_id: string;
+  agent: string;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ContentAnalysisRecord extends AnalysisRecord {
+  video_id: string;
+}
+
+export interface CompetitorAnalysisRecord extends AnalysisRecord {
+  handle: string;
+}
+
+export interface TrendReportRecord extends AnalysisRecord {
+  period: string;
+}
+
+export interface ReviewReportRecord extends AnalysisRecord {
+  content_id: string;
+  decision: string | null;
+  decision_comment: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+}
+
+export interface CompetitorOverview {
+  competitors: Array<{
+    handle: string;
+    follower_count: number;
+    average_views: number;
+    engagement_rate: number;
+    posting_frequency: string;
+  }>;
+  latest_analyses: CompetitorAnalysisRecord[];
+}
+
+export interface ReviewQueueItem {
+  content_id: string;
+  title: string;
+  category: string;
+  status: string;
+  confidence_score: number;
+  latest_review: ReviewReportRecord | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HistoricalAnalytics {
+  content_analyses: ContentAnalysisRecord[];
+  competitor_analyses: CompetitorAnalysisRecord[];
+  trend_reports: TrendReportRecord[];
+  review_reports: ReviewReportRecord[];
+  pattern_analyses: AnalysisRecord[];
+  metrics_snapshots: AnalyticsSnapshot[];
+}
+
+export interface AnalysisResponse {
+  success: boolean;
+  data?: Record<string, unknown> | null;
+  analysis_id?: string | null;
+  version?: number | null;
+  error?: string | null;
+  error_type?: string | null;
+}
