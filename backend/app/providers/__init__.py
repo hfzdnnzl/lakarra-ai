@@ -1,7 +1,7 @@
 """Data provider interfaces for the Content Analyst agent.
 
-Supports multiple data sources via pluggable providers. Mock implementations
-ship by default; future phases can swap in official APIs or browser automation.
+Supports multiple data sources via pluggable providers. The default ``live``
+provider fetches real public TikTok metrics; ``mock`` is for offline tests only.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from random import Random
 
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..models.analytics import (
     CompetitorAccountData,
     PerformanceMetrics,
@@ -319,11 +320,20 @@ class InternalContentProviderImpl(InternalContentProvider):
 def build_tiktok_provider(handle: str) -> TikTokProvider:
     """Build a TikTok data provider for the given @handle."""
 
-    return MockTikTokProvider(normalize_tiktok_handle(handle))
+    normalized = normalize_tiktok_handle(handle)
+    if get_settings().tiktok_provider == "mock":
+        return MockTikTokProvider(normalized)
+    from .tiktok_live import LiveTikTokProvider
+
+    return LiveTikTokProvider(normalized)
 
 
 def build_competitor_provider() -> CompetitorProvider:
-    return MockCompetitorProvider()
+    if get_settings().tiktok_provider == "mock":
+        return MockCompetitorProvider()
+    from .tiktok_live import LiveCompetitorProvider
+
+    return LiveCompetitorProvider()
 
 
 def build_internal_content_provider(session: Session) -> InternalContentProvider:

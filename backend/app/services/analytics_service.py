@@ -401,18 +401,25 @@ class AnalyticsService:
         from ..providers import build_competitor_provider
 
         provider = build_competitor_provider()
+        handles = self.repo.list_competitor_handles(limit=20)
+        if not handles and get_settings().tiktok_provider == "mock":
+            handles = provider.list_known_competitors()
+
         competitors = []
-        for handle in provider.list_known_competitors():
-            account = provider.get_account(handle)
-            competitors.append(
-                {
-                    "handle": account.handle,
-                    "follower_count": account.follower_count,
-                    "average_views": account.average_views,
-                    "engagement_rate": account.engagement_rate,
-                    "posting_frequency": account.posting_frequency,
-                }
-            )
+        for handle in handles:
+            try:
+                account = provider.get_account(handle)
+                competitors.append(
+                    {
+                        "handle": account.handle,
+                        "follower_count": account.follower_count,
+                        "average_views": account.average_views,
+                        "engagement_rate": account.engagement_rate,
+                        "posting_frequency": account.posting_frequency,
+                    }
+                )
+            except LakarraError:
+                logger.warning("competitor.fetch.failed handle=%s", handle)
         analyses = self.repo.list_competitor_analyses(limit=10)
         from ..models.analytics import CompetitorAnalysisRead
 

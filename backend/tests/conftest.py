@@ -16,6 +16,7 @@ os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["LLM_PROVIDER"] = "mock"
 os.environ["VIDEO_ANALYSIS_PROVIDER"] = "mock"
 os.environ["TIKTOK_ACCOUNT_HANDLE"] = "lakarra"
+os.environ["TIKTOK_PROVIDER"] = "mock"
 
 import pytest  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402

@@ -103,8 +103,8 @@ export default function AnalyticsOverviewPage() {
             Connect Your TikTok Account
           </CardTitle>
           <CardDescription>
-            Enter the @handle for the Lakarra TikTok account you want analyzed (without the @).
-            This is required before the Content Analyst can pull video and performance data.
+            Enter the @handle for the TikTok account you want analyzed (without the @).
+            The Content Analyst fetches real public video and performance data from TikTok.
           </CardDescription>
         </CardHeader>
         <CardContent>

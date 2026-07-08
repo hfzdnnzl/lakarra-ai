@@ -62,6 +62,11 @@ class MissingAccountHandleError(LakarraError):
     http_status = 400
 
 
+class TikTokFetchError(LakarraError):
+    error_type = "tiktok_fetch_error"
+    http_status = 502
+
+
 _ERROR_CLASSES = [
     MissingAPIKeyError,
     LLMTimeoutError,
@@ -71,6 +76,7 @@ _ERROR_CLASSES = [
     OutputValidationError,
     NotFoundError,
     MissingAccountHandleError,
+    TikTokFetchError,
 ]
 
 #: Map of ``error_type`` -> suggested HTTP status.

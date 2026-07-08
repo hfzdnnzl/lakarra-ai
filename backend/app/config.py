@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     # Your Lakarra TikTok @handle (without @). Can also be set via the dashboard
     # or PUT /api/analytics/account/settings — the saved value takes precedence.
     tiktok_account_handle: str = ""
+    # ``live`` fetches real public TikTok data; ``mock`` is for offline tests only.
+    tiktok_provider: Literal["live", "mock"] = "live"
+    tiktok_api_base_url: str = "https://www.tikwm.com"
+    tiktok_max_videos: int = 35
+    tiktok_fetch_timeout_seconds: float = 45.0
 
 
 @lru_cache

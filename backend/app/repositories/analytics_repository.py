@@ -116,6 +116,15 @@ class AnalyticsRepository:
     def next_competitor_version(self, handle: str) -> int:
         return self._next_version(CompetitorAnalysisORM, handle=handle)
 
+    def list_competitor_handles(self, *, limit: int = 50) -> list[str]:
+        stmt = (
+            select(CompetitorAnalysisORM.handle)
+            .distinct()
+            .order_by(CompetitorAnalysisORM.handle)
+            .limit(limit)
+        )
+        return list(self.session.scalars(stmt))
+
     def list_competitor_analyses(
         self, *, handle: str | None = None, limit: int = 50
     ) -> list[CompetitorAnalysisORM]:
