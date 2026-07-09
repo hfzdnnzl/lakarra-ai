@@ -129,6 +129,7 @@ class Content(TimestampMixin, Base):
     active_version: Mapped[int] = mapped_column(Integer, default=1)
     constraints: Mapped[list] = mapped_column(JSON, default=list)
     performance_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tiktok_video_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
     scenes: Mapped[list[ContentScene]] = relationship(
         back_populates="content",
@@ -424,3 +425,17 @@ class VideoMetricsORM(TimestampMixin, Base):
     followers_gained: Mapped[int | None] = mapped_column(Integer, nullable=True)
     link_clicks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class VideoUploadORM(TimestampMixin, Base):
+    """User-uploaded TikTok video file for analytics visual analysis."""
+
+    __tablename__ = "video_uploads"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    tiktok_handle: Mapped[str] = mapped_column(String(128), index=True)
+    storage_key: Mapped[str] = mapped_column(String(512))
+    mime_type: Mapped[str] = mapped_column(String(128))
+    file_size: Mapped[int] = mapped_column(Integer)
+    original_filename: Mapped[str] = mapped_column(String(255))

@@ -100,10 +100,69 @@ class TestAnalyticsService:
         assert resp.success is True
         assert resp.analysis_id is not None
         assert resp.version == 1
+        assert resp.data is not None
+        assert resp.data.get("analysis_mode") == "metrics_only"
 
         repo = AnalyticsRepository(db_session)
         rows = repo.list_content_analyses(video_id="lk-001")
         assert len(rows) == 1
+
+    def test_analyze_video_full_with_analytics_upload(
+        self,
+        analytics_service: AnalyticsService,
+        db_session: Session,
+    ):
+        from unittest.mock import MagicMock, patch
+
+        from app.repositories.analytics_repository import AnalyticsRepository
+
+        repo = AnalyticsRepository(db_session)
+        repo.upsert_video_upload(
+            video_id="lk-004",
+            tiktok_handle="lakarra",
+            storage_key="analytics/lk-004/full.mp4",
+            mime_type="video/mp4",
+            file_size=20,
+            original_filename="clip.mp4",
+        )
+        db_session.commit()
+
+        mock_storage = MagicMock()
+        mock_storage.read_object.return_value = b"uploaded-video-bytes"
+
+        with patch("app.services.video_source.get_storage", return_value=mock_storage):
+            resp = analytics_service.analyze_video("lk-004", force=True)
+
+        assert resp.success is True
+        assert resp.data is not None
+        assert resp.data.get("analysis_mode") == "full"
+        assert resp.data.get("video_source") == "analytics_upload"
+        assert resp.data.get("visual_review") is not None
+        assert resp.data["visual_review"]["hook_description"]
+
+    def test_upload_video_file(
+        self, analytics_service: AnalyticsService, db_session: Session
+    ):
+        from unittest.mock import MagicMock, patch
+
+        mock_storage = MagicMock()
+        with patch("app.services.analytics_service.get_storage", return_value=mock_storage):
+            result = analytics_service.upload_video_file(
+                "lk-005",
+                data=b"video-bytes",
+                mime_type="video/mp4",
+                original_filename="posted.mp4",
+            )
+
+        assert result.video_id == "lk-005"
+        assert result.original_filename == "posted.mp4"
+        assert result.mime_type == "video/mp4"
+        mock_storage.put_object.assert_called_once()
+
+        page = analytics_service.get_content_page()
+        uploaded = next(v for v in page.videos if v.video_id == "lk-005")
+        assert uploaded.has_video_upload is True
+        assert uploaded.upload_filename == "posted.mp4"
 
     def test_versioning_never_overwrites(self, analytics_service: AnalyticsService):
         first = analytics_service.analyze_video("lk-002")
@@ -345,6 +404,33 @@ class TestAnalyticsAPI:
       data = resp.json()
       assert "content_analyses" in data
       assert "trend_reports" in data
+
+  def test_upload_video_endpoint(self, client: TestClient):
+      from io import BytesIO
+
+      resp = client.post(
+          "/api/analytics/videos/lk-001/upload",
+          files={"file": ("clip.mp4", BytesIO(b"fake-video"), "video/mp4")},
+      )
+      assert resp.status_code == 201
+      data = resp.json()
+      assert data["video_id"] == "lk-001"
+      assert data["original_filename"] == "clip.mp4"
+
+      stream = client.get("/api/analytics/videos/lk-001/upload/stream")
+      assert stream.status_code == 200
+
+      delete = client.delete("/api/analytics/videos/lk-001/upload")
+      assert delete.status_code == 204
+
+  def test_upload_video_rejects_invalid_mime(self, client: TestClient):
+      from io import BytesIO
+
+      resp = client.post(
+          "/api/analytics/videos/lk-001/upload",
+          files={"file": ("note.txt", BytesIO(b"text"), "text/plain")},
+      )
+      assert resp.status_code == 400
 
   def test_review_queue_endpoint(self, client: TestClient):
       resp = client.get("/api/analytics/review-queue")

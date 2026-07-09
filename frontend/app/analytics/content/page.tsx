@@ -14,10 +14,17 @@ import type { ContentAnalyticsPage } from "@/types";
 export default function ContentAnalyticsPage() {
   const { configured } = useAnalyticsAccount();
   const [page, setPage] = useState<ContentAnalyticsPage | null>(null);
+  const [videoAnalysisProvider, setVideoAnalysisProvider] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState<string | null>(null);
   const [expandAll, setExpandAll] = useState(true);
+
+  useEffect(() => {
+    void api.health().then((health) => {
+      setVideoAnalysisProvider(String(health.video_analysis_provider ?? "unknown"));
+    });
+  }, []);
 
   const load = useCallback(async () => {
     if (!configured) {
@@ -25,7 +32,8 @@ export default function ContentAnalyticsPage() {
       return;
     }
     try {
-      setPage(await api.analyticsContent());
+      const contentPage = await api.analyticsContent();
+      setPage(contentPage);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -73,7 +81,7 @@ export default function ContentAnalyticsPage() {
       <>
         <PageHeader
           title="Content Analytics"
-          description="Confirm TikTok Studio metrics, then run AI analysis on your videos."
+          description="Confirm TikTok Studio metrics, upload each video file, then run AI analysis."
         />
         <p className="text-muted-foreground">
           Connect your TikTok account above to manage video metrics.
@@ -86,7 +94,7 @@ export default function ContentAnalyticsPage() {
     <>
       <PageHeader
         title="Content Analytics"
-        description="Enter TikTok Studio metrics per video, then run AI analysis."
+        description="Enter TikTok Studio metrics per video, upload the posted video for full visual analysis, then run AI analysis."
         action={
           <Button onClick={analyzeAll} disabled={busy || !ready} size="sm">
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
@@ -98,6 +106,15 @@ export default function ContentAnalyticsPage() {
       {error ? (
         <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      ) : null}
+      {videoAnalysisProvider === "mock" ? (
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Visual analysis is running in demo mode (placeholder results). Set{" "}
+          <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code> and{" "}
+          <code className="rounded bg-amber-100 px-1">VIDEO_ANALYSIS_PROVIDER=gemini</code>{" "}
+          in the backend, then re-analyze uploaded videos for real on-screen text and scene
+          breakdown.
         </div>
       ) : null}
       {analyzeResult ? (

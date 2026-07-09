@@ -160,6 +160,35 @@ export const api = {
       `/analytics/videos/${video_id}/analyze?force=${force}`,
       { method: "POST" },
     ),
+  uploadAnalyticsVideo: async (video_id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_URL}/analytics/videos/${video_id}/upload`, {
+      method: "POST",
+      body: form,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let message = `Upload failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { detail?: string };
+        if (body.detail) message = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<{
+      video_id: string;
+      original_filename: string;
+      mime_type: string;
+      file_size: number;
+    }>;
+  },
+  analyticsVideoStreamUrl: (video_id: string) =>
+    `${API_URL}/analytics/videos/${video_id}/upload/stream`,
+  deleteAnalyticsVideoUpload: (video_id: string) =>
+    request<void>(`/analytics/videos/${video_id}/upload`, { method: "DELETE" }),
   analyticsCompetitors: () => request<import("@/types").CompetitorOverview>("/analytics/competitors"),
   analyticsTrends: () =>
     request<{ reports: import("@/types").TrendReportRecord[] }>("/analytics/trends"),

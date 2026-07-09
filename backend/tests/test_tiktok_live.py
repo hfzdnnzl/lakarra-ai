@@ -141,6 +141,33 @@ class TestTikTokRateLimitAndCache:
                 provider.fetch_account()
 
 
+class TestTikTokDownload:
+    def test_download_url_from_raw_prefers_wmplay(self):
+        from app.providers.tiktok_live import _download_url_from_raw
+
+        url = _download_url_from_raw(
+            {"wmplay": "https://cdn.example/wm.mp4", "play": "https://cdn.example/play.mp4"}
+        )
+        assert url == "https://cdn.example/wm.mp4"
+
+    def test_download_tiktok_video_uses_cache(self, monkeypatch):
+        from app.providers import tiktok_live
+
+        monkeypatch.setenv("TIKTOK_CACHE_TTL_SECONDS", "300")
+        get_settings.cache_clear()
+
+        key = "v1:brand"
+        tiktok_live._VIDEO_BYTES_CACHE[key] = (
+            tiktok_live.time.monotonic(),
+            b"cached-video",
+            "video/mp4",
+        )
+        tiktok_live._VIDEO_URL_CACHE[key] = (tiktok_live.time.monotonic(), "https://cdn.example/v.mp4")
+
+        result = tiktok_live.download_tiktok_video("brand", "v1")
+        assert result == (b"cached-video", "video/mp4", "https://cdn.example/v.mp4")
+
+
 @pytest.mark.integration
 def test_live_tiktok_fetches_real_account(monkeypatch):
     monkeypatch.setenv("TIKTOK_PROVIDER", "live")

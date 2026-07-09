@@ -16,7 +16,8 @@ import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from ..config import get_settings
+from ..config import effective_video_analysis_model, effective_video_analysis_provider, get_settings
+from .ffmpeg_utils import resolve_ffmpeg_executable
 from ..errors import LLMCallError, MissingAPIKeyError
 from ..services.json_utils import extract_json
 
@@ -50,6 +51,47 @@ class MockVideoAnalysisService(VideoAnalysisService):
         is_fidelity = (
             "overall_match_score" in review_prompt or "plan-fidelity" in review_prompt.lower()
         )
+        is_visual = (
+            "content_analyst_video_visual" in review_prompt.lower()
+            or '"analysis_mode": "visual"' in review_prompt
+            or "visual review" in review_prompt.lower()
+        )
+
+        if is_visual:
+            return json.dumps(
+                {
+                    "analysis_mode": "visual",
+                    "hook_description": "Opens with a close-up product reveal in the first second.",
+                    "scene_breakdown": [
+                        "0:00 — Hook frame with on-screen title text.",
+                        "0:03 — Product detail montage with quick cuts.",
+                        "0:08 — Final CTA frame with brand handle.",
+                    ],
+                    "on_screen_text": ["Simple. Premium. Effortless."],
+                    "pacing_notes": "Fast cuts in the opening; slower middle section.",
+                    "cta_observations": "CTA appears in the final two seconds.",
+                    "hook_score": {
+                        "score": 0.76,
+                        "explanation": "Strong scroll-stop visual in the first frame.",
+                    },
+                    "retention_score": {
+                        "score": 0.62,
+                        "explanation": "Visual progression slows mid-video.",
+                    },
+                    "pacing_score": {
+                        "score": 0.7,
+                        "explanation": "Opening pace is strong for short-form.",
+                    },
+                    "storytelling_score": {
+                        "score": 0.68,
+                        "explanation": "Clear before/after visual arc.",
+                    },
+                    "strongest_timestamp": "0:01",
+                    "weakest_timestamp": "0:10",
+                    "drop_off_points": ["Mid-video static product shot"],
+                    "summary": "Visually polished short-form clip with a strong opening frame.",
+                }
+            )
 
         if is_fidelity:
             return json.dumps(
@@ -114,7 +156,7 @@ class GeminiVideoAnalysisService(VideoAnalysisService):
             ) from exc
 
         genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel(settings.video_analysis_model)
+        model = genai.GenerativeModel(effective_video_analysis_model(settings))
 
         suffix = ".mp4" if "mp4" in mime_type else ".mov" if "quicktime" in mime_type else ".webm"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -162,8 +204,8 @@ class OpenAIVideoAnalysisService(VideoAnalysisService):
         frames = _sample_frames(video_bytes, mime_type)
         if not frames:
             raise LLMCallError(
-                "OpenAI video analysis requires ffmpeg to sample frames. "
-                "Install ffmpeg or set VIDEO_ANALYSIS_PROVIDER=gemini."
+                "OpenAI video analysis could not extract frames from the upload. "
+                "Install ffmpeg, add imageio-ffmpeg, or set VIDEO_ANALYSIS_PROVIDER=gemini."
             )
 
         try:
@@ -186,7 +228,7 @@ class OpenAIVideoAnalysisService(VideoAnalysisService):
 
         try:
             response = client.chat.completions.create(
-                model=settings.video_analysis_model,
+                model=effective_video_analysis_model(settings),
                 messages=[{"role": "user", "content": content_parts}],
                 response_format={"type": "json_object"},
             )
@@ -200,6 +242,10 @@ class OpenAIVideoAnalysisService(VideoAnalysisService):
 
 
 def _sample_frames(video_bytes: bytes, mime_type: str) -> list[bytes]:
+    ffmpeg = resolve_ffmpeg_executable()
+    if ffmpeg is None:
+        return []
+
     suffix = ".mp4" if "mp4" in mime_type else ".mov" if "quicktime" in mime_type else ".webm"
     frames: list[bytes] = []
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -208,7 +254,7 @@ def _sample_frames(video_bytes: bytes, mime_type: str) -> list[bytes]:
         for i, t in enumerate((0, 3, 6, 9, 12)):
             out_path = Path(tmpdir) / f"frame_{i}.jpg"
             cmd = [
-                "ffmpeg",
+                ffmpeg,
                 "-y",
                 "-ss",
                 str(t),
@@ -232,7 +278,7 @@ def _sample_frames(video_bytes: bytes, mime_type: str) -> list[bytes]:
 
 
 def build_video_analysis_service() -> VideoAnalysisService:
-    provider = get_settings().video_analysis_provider
+    provider = effective_video_analysis_provider()
     if provider == "mock":
         return MockVideoAnalysisService()
     if provider == "gemini":

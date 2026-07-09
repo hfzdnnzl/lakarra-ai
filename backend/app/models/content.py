@@ -169,6 +169,7 @@ class ContentRead(BaseModel):
     product: str
     constraints: list[str] = Field(default_factory=list)
     performance_notes: str | None = None
+    tiktok_video_id: str | None = None
     hook: str
     duration: int
     caption: str

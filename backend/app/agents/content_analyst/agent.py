@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from ...config import get_settings
+from ...config import effective_video_analysis_model, effective_video_analysis_provider, get_settings
 from ...errors import LakarraError, OutputValidationError
 from ...models.analytics import (
     CompetitorAnalysisPayload,
@@ -19,6 +19,7 @@ from ...models.analytics import (
     PatternAnalysisPayload,
     ReviewReportPayload,
     TrendReportPayload,
+    VisualReviewPayload,
 )
 from ...models.content import PerformanceReviewPayload
 from ...models.db import Content
@@ -216,10 +217,10 @@ class ContentAnalystAgent(BaseAgent):
                 f"Performance review failed validation: {exc.error_count()} error(s)."
             ) from exc
 
-        provider = get_settings().video_analysis_provider
+        provider = effective_video_analysis_provider()
         return AnalysisResult(
             review=review,
-            model=get_settings().video_analysis_model,
+            model=effective_video_analysis_model(),
             provider=provider,
             prompt_version=template.version,
         )
@@ -374,6 +375,75 @@ class ContentAnalystAgent(BaseAgent):
             },
             ContentAnalysisPayload,
         )
+
+    def analyze_video_visual(
+        self,
+        *,
+        video_bytes: bytes,
+        mime_type: str,
+        video_data: TikTokVideoData,
+        content: Content | None = None,
+    ) -> VisualReviewPayload:
+        """Multimodal visual review of a published video."""
+
+        template = load_prompt("content_analyst_video_visual")
+        plan_context = "(no CMS plan linked)"
+        if content is not None:
+            plan_context = (
+                f"Title: {content.title}\n"
+                f"Category: {content.category}\n"
+                f"Hook: {content.hook}\n"
+                f"Duration: {content.duration}s\n"
+                f"Caption: {content.caption}\n"
+                f"CTA: {content.cta}"
+            )
+        performance_summary = json.dumps(
+            {
+                "views": video_data.performance.views,
+                "completion_rate": video_data.performance.completion_rate,
+                "average_watch_duration": video_data.performance.average_watch_duration,
+                "likes": video_data.performance.likes,
+                "comments": video_data.performance.comments,
+                "shares": video_data.performance.shares,
+                "saves": video_data.performance.saves,
+            },
+            indent=2,
+        )
+        user_prompt = template.render_user(
+            {
+                "duration": str(video_data.video.duration),
+                "plan_context": plan_context,
+                "performance_summary": performance_summary,
+            }
+        )
+        review_prompt = f"{template.system}\n\n{user_prompt}"
+        plan_json = json.dumps(
+            {
+                "video_id": video_data.video.video_id,
+                "title": video_data.video.title,
+                "caption": video_data.video.caption,
+                "duration": video_data.video.duration,
+                "content_category": video_data.video.content_category,
+            },
+            indent=2,
+        )
+        analyzer = build_video_analysis_service()
+        raw = analyzer.analyze(
+            video_bytes=video_bytes,
+            mime_type=mime_type,
+            plan_json=plan_json,
+            review_prompt=review_prompt,
+        )
+        data = parse_review_json(raw)
+        try:
+            return VisualReviewPayload(**data)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            location = ".".join(str(part) for part in first.get("loc", ()))
+            detail = first.get("msg", "invalid value")
+            raise OutputValidationError(
+                f"Visual analysis output failed validation at {location}: {detail}"
+            ) from exc
 
     def analyze_all_videos(self) -> list[AgentAnalysisResult]:
         """Analyze every published video on the Lakarra account."""

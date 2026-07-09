@@ -214,7 +214,10 @@ def stream_asset(
     local_path = get_storage().get_local_path(asset.storage_key)
     if local_path is not None:
         return FileResponse(
-            local_path, media_type=asset.mime_type, filename=asset.original_filename
+            local_path,
+            media_type=asset.mime_type,
+            filename=asset.original_filename,
+            content_disposition_type="inline",
         )
     try:
         data = get_storage().read_object(asset.storage_key)

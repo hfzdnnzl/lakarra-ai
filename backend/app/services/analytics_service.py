@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
 from ..agents import get_agent_context
 from ..agents.content_analyst import ContentAnalystAgent
-from ..config import get_settings
+from ..config import effective_video_analysis_provider, get_settings
 from ..errors import (
     LakarraError,
     MetricsIncompleteError,
@@ -22,6 +24,7 @@ from ..models.analytics import (
     AnalysisResponse,
     AnalyzeAllResponse,
     CompetitorOverview,
+    ContentAnalysisPayload,
     ContentAnalyticsPage,
     HistoricalAnalytics,
     MetricsReadiness,
@@ -32,6 +35,8 @@ from ..models.analytics import (
     VideoInfo,
     VideoMetricsData,
     VideoMetricsRead,
+    VideoUploadRead,
+    VisualReviewPayload,
     normalize_tiktok_handle,
 )
 from ..providers import (
@@ -43,6 +48,8 @@ from ..providers import (
 from ..providers.tiktok_live import LiveTikTokProvider
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
+from .analysis_merge import merge_visual_into_content_analysis
+from .storage_service import get_storage
 from .video_metrics import (
     METRIC_FIELD_LABELS,
     OPTIONAL_METRIC_FIELDS,
@@ -53,8 +60,14 @@ from .video_metrics import (
     missing_required,
     video_display_label,
 )
+from .video_source import resolve_video_source
 
 logger = logging.getLogger("lakarra.analytics_service")
+
+
+def _safe_filename(name: str) -> str:
+    safe = Path(name).name.strip()
+    return safe if safe and safe not in {".", ".."} else "upload.mp4"
 
 
 class AnalyticsService:
@@ -400,14 +413,20 @@ class AnalyticsService:
         sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
         metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
+        uploads_map = {u.video_id: u for u in self.repo.list_video_uploads(tiktok_handle=handle)}
 
         catalog: list[VideoCatalogItem] = []
         for video in account.videos:
             vid = video.video.video_id
             priority = "high" if vid in priority_ids else "normal"
             row = metrics_map.get(vid)
+            upload = uploads_map.get(vid)
             latest = analyses.get(vid)
             payload = latest.payload if latest else {}
+            visual_raw = payload.get("visual_review")
+            visual_review = (
+                VisualReviewPayload(**visual_raw) if isinstance(visual_raw, dict) else None
+            )
             catalog.append(
                 VideoCatalogItem(
                     video_id=vid,
@@ -423,11 +442,77 @@ class AnalyticsService:
                     analysis_version=latest.version if latest else None,
                     analysis_id=latest.id if latest else None,
                     analysis_summary=payload.get("summary"),
+                    analysis_mode=payload.get("analysis_mode", "metrics_only"),
+                    visual_analysis_provider=payload.get("visual_analysis_provider"),
+                    has_video_upload=upload is not None,
+                    upload_filename=upload.original_filename if upload else None,
+                    visual_review=visual_review,
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
                 )
             )
         return catalog
+
+    def upload_video_file(
+        self,
+        video_id: str,
+        *,
+        data: bytes,
+        mime_type: str,
+        original_filename: str,
+    ) -> VideoUploadRead:
+        settings = get_settings()
+        if len(data) > settings.max_upload_bytes:
+            raise ValueError(
+                f"File exceeds maximum size of {settings.max_upload_bytes // (1024 * 1024)} MB."
+            )
+        if mime_type not in settings.allowed_upload_mime_types:
+            raise ValueError(f"Unsupported file type: {mime_type}")
+
+        handle = self._require_handle()
+        if not self._video_known(handle, video_id):
+            raise NotFoundError(f"Video '{video_id}' not found.")
+
+        existing = self.repo.get_video_upload(video_id)
+        if existing is not None:
+            try:
+                get_storage().delete(existing.storage_key)
+            except OSError:
+                logger.warning("upload.delete_old_failed video_id=%s", video_id)
+
+        storage_key = (
+            f"analytics/{video_id}/{uuid4().hex}_{_safe_filename(original_filename)}"
+        )
+        get_storage().put_object(storage_key, data, content_type=mime_type)
+        row = self.repo.upsert_video_upload(
+            video_id=video_id,
+            tiktok_handle=handle,
+            storage_key=storage_key,
+            mime_type=mime_type,
+            file_size=len(data),
+            original_filename=_safe_filename(original_filename),
+        )
+        self.session.commit()
+        return VideoUploadRead(
+            video_id=video_id,
+            original_filename=row.original_filename,
+            mime_type=row.mime_type,
+            file_size=row.file_size,
+            uploaded_at=row.updated_at,
+        )
+
+    def get_video_upload_row(self, video_id: str):
+        return self.repo.get_video_upload(video_id)
+
+    def delete_video_upload(self, video_id: str) -> None:
+        row = self.repo.delete_video_upload(video_id)
+        if row is None:
+            raise NotFoundError(f"No upload found for video '{video_id}'.")
+        try:
+            get_storage().delete(row.storage_key)
+        except OSError:
+            logger.warning("upload.delete_storage_failed video_id=%s", video_id)
+        self.session.commit()
 
     # --- Video metrics & catalog -------------------------------------------
     def _sync_public_metrics(self, handle: str, video: TikTokVideoData) -> None:
@@ -615,27 +700,55 @@ class AnalyticsService:
             self.session.flush()
             video_data = self._apply_user_metrics_to_video(video_data)
 
-            posted = self.content_repo.list_past_posts(exclude_id=content_id or "", limit=10)
+            posted = self.content_repo.list_past_posts(exclude_id="", limit=10)
             historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
-            result = self._analyst._analyze_video_data(  # noqa: SLF001
+            metrics_result = self._analyst._analyze_video_data(  # noqa: SLF001
                 video_data, historical_context=historical
             )
+            metrics_payload = ContentAnalysisPayload(**metrics_result.payload)
+
+            source = resolve_video_source(
+                self.session,
+                video_id=video_id,
+                tiktok_handle=handle,
+            )
+            visual_review: VisualReviewPayload | None = None
+            visual_provider: str | None = None
+            if source.bytes:
+                visual_provider = effective_video_analysis_provider()
+                visual_review = self._analyst.analyze_video_visual(
+                    video_bytes=source.bytes,
+                    mime_type=source.mime_type,
+                    video_data=video_data,
+                    content=None,
+                )
+
+            merged = merge_visual_into_content_analysis(
+                metrics_payload,
+                visual_review,
+                analysis_mode="full" if visual_review else "metrics_only",
+                video_source=source.source,
+                linked_content_id=None,
+                visual_analysis_provider=visual_provider,
+            )
+            merged_payload = merged.model_dump()
+
             version = self.repo.next_content_analysis_version(video_id)
             row = self.repo.save_content_analysis(
                 video_id=video_id,
-                content_id=content_id,
+                content_id=None,
                 version=version,
                 agent=self._analyst.name,
-                provider=result.provider,
-                model=result.model,
-                prompt_version=result.prompt_version,
-                payload=result.payload,
+                provider=metrics_result.provider,
+                model=metrics_result.model,
+                prompt_version=metrics_result.prompt_version,
+                payload=merged_payload,
             )
-            self._save_engagement_snapshots(result.payload)
+            self._save_engagement_snapshots(merged_payload)
             self.session.commit()
             return AnalysisResponse(
                 success=True,
-                data=result.payload,
+                data=merged_payload,
                 analysis_id=row.id,
                 version=version,
             )

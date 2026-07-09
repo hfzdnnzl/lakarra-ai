@@ -72,6 +72,11 @@ class MetricsIncompleteError(LakarraError):
     http_status = 400
 
 
+class ConflictError(LakarraError):
+    error_type = "conflict"
+    http_status = 409
+
+
 _ERROR_CLASSES = [
     MissingAPIKeyError,
     LLMTimeoutError,
@@ -83,6 +88,7 @@ _ERROR_CLASSES = [
     MissingAccountHandleError,
     TikTokFetchError,
     MetricsIncompleteError,
+    ConflictError,
 ]
 
 #: Map of ``error_type`` -> suggested HTTP status.

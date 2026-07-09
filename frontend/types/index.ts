@@ -389,6 +389,18 @@ export interface VideoMetrics {
   metrics_priority: string;
 }
 
+export interface VisualReview {
+  hook_description: string;
+  scene_breakdown: string[];
+  on_screen_text: string[];
+  pacing_notes: string;
+  cta_observations: string;
+  strongest_timestamp: string;
+  weakest_timestamp: string;
+  drop_off_points: string[];
+  summary: string;
+}
+
 export interface VideoCatalogItem {
   video_id: string;
   title: string;
@@ -401,6 +413,11 @@ export interface VideoCatalogItem {
   analysis_version: number | null;
   analysis_id: string | null;
   analysis_summary: string | null;
+  analysis_mode?: "full" | "metrics_only";
+  visual_analysis_provider?: "mock" | "gemini" | "openai" | null;
+  has_video_upload?: boolean;
+  upload_filename?: string | null;
+  visual_review?: VisualReview | null;
   metrics: VideoMetrics;
   metrics_priority: string;
 }

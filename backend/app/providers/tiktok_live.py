@@ -31,6 +31,8 @@ logger = logging.getLogger("lakarra.tiktok_live")
 _REQUEST_LOCK = threading.Lock()
 _LAST_REQUEST_AT = 0.0
 _ACCOUNT_CACHE: dict[str, tuple[float, TikTokAccountData]] = {}
+_VIDEO_URL_CACHE: dict[str, tuple[float, str]] = {}
+_VIDEO_BYTES_CACHE: dict[str, tuple[float, bytes, str]] = {}
 
 _RATE_LIMIT_PATTERN = re.compile(r"limit|request/second|too many", re.IGNORECASE)
 
@@ -48,9 +50,15 @@ def clear_account_cache(handle: str | None = None) -> None:
 
     if handle is None:
         _ACCOUNT_CACHE.clear()
+        _VIDEO_URL_CACHE.clear()
+        _VIDEO_BYTES_CACHE.clear()
         return
     normalized = normalize_tiktok_handle(handle)
     _ACCOUNT_CACHE.pop(normalized, None)
+    keys_to_drop = [key for key in _VIDEO_URL_CACHE if key.endswith(f":{normalized}")]
+    for key in keys_to_drop:
+        _VIDEO_URL_CACHE.pop(key, None)
+        _VIDEO_BYTES_CACHE.pop(key, None)
 
 
 def _is_rate_limit_error(message: str) -> bool:
@@ -141,6 +149,134 @@ def _get_json(client: httpx.Client, path: str, *, params: dict) -> dict:
     raise TikTokFetchError("TikTok data request failed.")
 
 
+def _post_json(client: httpx.Client, path: str, *, data: dict) -> dict:
+    settings = get_settings()
+    last_error: TikTokFetchError | None = None
+
+    for attempt in range(settings.tiktok_rate_limit_retries):
+        with _REQUEST_LOCK:
+            global _LAST_REQUEST_AT  # noqa: PLW0603
+            elapsed = time.monotonic() - _LAST_REQUEST_AT
+            if elapsed < 1.1:
+                time.sleep(1.1 - elapsed)
+
+            base = settings.tiktok_api_base_url.rstrip("/")
+            try:
+                response = client.post(f"{base}{path}", data=data)
+            except httpx.HTTPError as exc:
+                last_error = TikTokFetchError(f"TikTok data request failed: {exc}")
+                _LAST_REQUEST_AT = time.monotonic()
+            else:
+                if response.status_code != 200:
+                    message = f"TikTok data request failed (HTTP {response.status_code})."
+                    last_error = TikTokFetchError(message)
+                    _LAST_REQUEST_AT = time.monotonic()
+                    if not _is_retryable_status(response.status_code):
+                        raise last_error
+                else:
+                    try:
+                        payload = response.json()
+                    except ValueError as exc:
+                        raise TikTokFetchError(
+                            "TikTok data provider returned invalid JSON."
+                        ) from exc
+                    if payload.get("code") != 0:
+                        message = payload.get("msg") or "TikTok data request failed."
+                        last_error = TikTokFetchError(message)
+                        _LAST_REQUEST_AT = time.monotonic()
+                        if not _is_rate_limit_error(message):
+                            raise last_error
+                    else:
+                        _LAST_REQUEST_AT = time.monotonic()
+                        return payload["data"]
+
+        if attempt < settings.tiktok_rate_limit_retries - 1 and last_error is not None:
+            time.sleep(settings.tiktok_rate_limit_retry_seconds)
+            continue
+        if last_error is not None:
+            raise last_error
+
+    raise TikTokFetchError("TikTok data request failed.")
+
+
+def _download_url_from_raw(raw: dict) -> str:
+    for key in ("wmplay", "play", "hdplay"):
+        url = raw.get(key)
+        if url:
+            return str(url)
+    return ""
+
+
+def _cache_key(handle: str, video_id: str) -> str:
+    return f"{video_id}:{normalize_tiktok_handle(handle)}"
+
+
+def _resolve_download_url(handle: str, video_id: str, raw: dict | None = None) -> str:
+    key = _cache_key(handle, video_id)
+    cached = _VIDEO_URL_CACHE.get(key)
+    ttl = get_settings().tiktok_cache_ttl_seconds
+    if cached and (time.monotonic() - cached[0]) < ttl:
+        return cached[1]
+    if raw is not None:
+        url = _download_url_from_raw(raw)
+        if url:
+            _VIDEO_URL_CACHE[key] = (time.monotonic(), url)
+            return url
+
+    page_url = f"https://www.tiktok.com/@{handle}/video/{video_id}"
+    with _client() as client:
+        data = _post_json(client, "/api/", data={"url": page_url, "hd": 1})
+    url = _download_url_from_raw(data)
+    if url:
+        _VIDEO_URL_CACHE[key] = (time.monotonic(), url)
+    return url
+
+
+def download_tiktok_video(handle: str, video_id: str) -> tuple[bytes, str, str] | None:
+    """Download TikTok video bytes via tikwm CDN URL."""
+
+    normalized = normalize_tiktok_handle(handle)
+    if not normalized or not video_id:
+        return None
+
+    key = _cache_key(normalized, video_id)
+    cached_bytes = _VIDEO_BYTES_CACHE.get(key)
+    ttl = get_settings().tiktok_cache_ttl_seconds
+    if cached_bytes and (time.monotonic() - cached_bytes[0]) < ttl:
+        url_entry = _VIDEO_URL_CACHE.get(key)
+        download_url = url_entry[1] if url_entry else ""
+        return cached_bytes[1], cached_bytes[2], download_url
+
+    download_url = _resolve_download_url(normalized, video_id)
+    if not download_url:
+        return None
+
+    max_bytes = get_settings().max_upload_bytes
+    timeout = get_settings().tiktok_fetch_timeout_seconds
+    with _client() as client:
+        with client.stream("GET", download_url, timeout=timeout) as response:
+            if response.status_code != 200:
+                raise TikTokFetchError(
+                    f"TikTok video download failed (HTTP {response.status_code})."
+                )
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise TikTokFetchError(
+                        f"TikTok video exceeds max size ({max_bytes} bytes)."
+                    )
+                chunks.append(chunk)
+    data = b"".join(chunks)
+    if not data:
+        return None
+
+    mime_type = "video/mp4"
+    _VIDEO_BYTES_CACHE[key] = (time.monotonic(), data, mime_type)
+    return data, mime_type, download_url
+
+
 def _caption_from_video(raw: dict) -> str:
     desc = raw.get("desc") or raw.get("title") or ""
     if desc:
@@ -198,7 +334,12 @@ def _video_from_raw(handle: str, raw: dict) -> TikTokVideoData:
         followers_gained=0,
         link_clicks=None,
     )
-    return TikTokVideoData(video=video, performance=performance, comments=[])
+    return TikTokVideoData(
+        video=video,
+        performance=performance,
+        comments=[],
+        download_url=_download_url_from_raw(raw),
+    )
 
 
 class LiveTikTokProvider(TikTokProvider):

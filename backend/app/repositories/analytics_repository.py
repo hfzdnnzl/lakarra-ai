@@ -17,6 +17,7 @@ from ..models.db import (
     ReviewReportORM,
     TrendReportORM,
     VideoMetricsORM,
+    VideoUploadORM,
 )
 
 
@@ -134,6 +135,52 @@ class AnalyticsRepository:
 
     def list_video_metrics(self, *, tiktok_handle: str) -> list[VideoMetricsORM]:
         stmt = select(VideoMetricsORM).where(VideoMetricsORM.tiktok_handle == tiktok_handle)
+        return list(self.session.scalars(stmt))
+
+    # --- Video uploads (analytics direct upload) ---------------------------
+    def get_video_upload(self, video_id: str) -> VideoUploadORM | None:
+        stmt = select(VideoUploadORM).where(VideoUploadORM.video_id == video_id)
+        return self.session.scalar(stmt)
+
+    def upsert_video_upload(
+        self,
+        *,
+        video_id: str,
+        tiktok_handle: str,
+        storage_key: str,
+        mime_type: str,
+        file_size: int,
+        original_filename: str,
+    ) -> VideoUploadORM:
+        row = self.get_video_upload(video_id)
+        if row is None:
+            row = VideoUploadORM(
+                id=_new_id(),
+                video_id=video_id,
+                tiktok_handle=tiktok_handle,
+                storage_key=storage_key,
+                mime_type=mime_type,
+                file_size=file_size,
+                original_filename=original_filename,
+            )
+            self.session.add(row)
+        else:
+            row.tiktok_handle = tiktok_handle
+            row.storage_key = storage_key
+            row.mime_type = mime_type
+            row.file_size = file_size
+            row.original_filename = original_filename
+        return row
+
+    def delete_video_upload(self, video_id: str) -> VideoUploadORM | None:
+        row = self.get_video_upload(video_id)
+        if row is None:
+            return None
+        self.session.delete(row)
+        return row
+
+    def list_video_uploads(self, *, tiktok_handle: str) -> list[VideoUploadORM]:
+        stmt = select(VideoUploadORM).where(VideoUploadORM.tiktok_handle == tiktok_handle)
         return list(self.session.scalars(stmt))
 
     # --- Competitor Analysis -----------------------------------------------

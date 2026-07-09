@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
   Loader2,
   Pencil,
+  PlayCircle,
   RefreshCw,
   Save,
+  Upload,
   X,
 } from "lucide-react";
 
@@ -17,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { VideoPreviewOverlay } from "@/components/VideoPreviewOverlay";
 import { api } from "@/lib/api";
 import {
   formatMetricDisplay,
@@ -49,6 +52,7 @@ export function VideoAnalyticsCard({
   onUpdated,
   expandAll,
 }: Props) {
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const label = videoDisplayLabel(video);
   const [expanded, setExpanded] = useState(
     expandAll ?? !video.metrics.required_complete,
@@ -63,6 +67,8 @@ export function VideoAnalyticsCard({
   );
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const resetForm = useCallback(() => {
@@ -143,6 +149,32 @@ export function VideoAnalyticsCard({
       setError((e as Error).message);
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const uploadVideo = async (file: File) => {
+    setUploading(true);
+    setError(null);
+    try {
+      await api.uploadAnalyticsVideo(video.video_id, file);
+      onUpdated();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeUpload = async () => {
+    setUploading(true);
+    setError(null);
+    try {
+      await api.deleteAnalyticsVideoUpload(video.video_id);
+      onUpdated();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -244,6 +276,19 @@ export function VideoAnalyticsCard({
               ) : (
                 <Badge variant="warning">Not analyzed</Badge>
               )}
+              {video.is_analyzed ? (
+                video.analysis_mode === "full" ? (
+                  <Badge variant="success">Full analysis</Badge>
+                ) : (
+                  <Badge variant="secondary">Metrics only</Badge>
+                )
+              ) : null}
+              {video.has_video_upload ? (
+                <Badge variant="outline">Video uploaded</Badge>
+              ) : null}
+              {video.analysis_mode === "full" && video.visual_analysis_provider === "mock" ? (
+                <Badge variant="warning">Demo visual analysis</Badge>
+              ) : null}
               {video.metrics.required_complete ? (
                 <Badge variant="success">Metrics complete</Badge>
               ) : (
@@ -300,6 +345,114 @@ export function VideoAnalyticsCard({
               {video.analysis_summary}
             </p>
           ) : null}
+
+          {video.visual_review ? (
+            <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+              <div className="font-medium">Visual review</div>
+              {video.analysis_mode === "full" && video.visual_analysis_provider === "mock" ? (
+                <p className="text-xs text-amber-700">
+                  This visual review used placeholder data. Re-analyze after configuring a real
+                  video analysis provider (Gemini recommended) in backend settings.
+                </p>
+              ) : null}
+              {video.visual_review.hook_description ? (
+                <p>
+                  <span className="font-medium text-foreground">Hook: </span>
+                  {video.visual_review.hook_description}
+                </p>
+              ) : null}
+              {video.visual_review.scene_breakdown.length > 0 ? (
+                <div>
+                  <div className="mb-1 font-medium text-foreground">Scenes</div>
+                  <ul className="list-inside list-disc space-y-1 text-muted-foreground">
+                    {video.visual_review.scene_breakdown.map((scene) => (
+                      <li key={scene}>{scene}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {video.visual_review.on_screen_text.length > 0 ? (
+                <p>
+                  <span className="font-medium text-foreground">On-screen text: </span>
+                  {video.visual_review.on_screen_text.join(" · ")}
+                </p>
+              ) : null}
+              {video.visual_review.pacing_notes ? (
+                <p>
+                  <span className="font-medium text-foreground">Pacing: </span>
+                  {video.visual_review.pacing_notes}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="space-y-2 rounded-md border p-3">
+            <div className="font-medium">Video for analysis</div>
+            <p className="text-xs text-muted-foreground">
+              Upload the posted TikTok video here for full visual analysis.
+            </p>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="video/mp4,video/quicktime,video/webm"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadVideo(file);
+                e.target.value = "";
+              }}
+            />
+            {video.has_video_upload && video.upload_filename ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="truncate text-sm">{video.upload_filename}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPreviewOpen(true)}
+                >
+                  <PlayCircle className="mr-1.5 h-4 w-4" />
+                  Preview
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={uploading}
+                  onClick={() => uploadInputRef.current?.click()}
+                >
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Replace"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={uploading}
+                  onClick={() => void removeUpload()}
+                >
+                  Remove
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={uploading}
+                  onClick={() => uploadInputRef.current?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  Upload video for analysis
+                </Button>
+                <p className="text-xs text-muted-foreground">MP4, MOV, or WebM up to 50 MB.</p>
+              </div>
+            )}
+          </div>
 
           {video.caption && video.caption !== label ? (
             <p className="line-clamp-3 text-xs text-muted-foreground">{video.caption}</p>
@@ -388,6 +541,14 @@ export function VideoAnalyticsCard({
             </div>
           ) : null}
         </CardContent>
+      ) : null}
+
+      {previewOpen && video.has_video_upload ? (
+        <VideoPreviewOverlay
+          src={api.analyticsVideoStreamUrl(video.video_id)}
+          title={video.upload_filename ?? label}
+          onClose={() => setPreviewOpen(false)}
+        />
       ) : null}
     </Card>
   );

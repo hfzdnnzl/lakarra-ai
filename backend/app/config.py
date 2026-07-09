@@ -75,7 +75,9 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
 
     # --- Video analysis (upload review) ------------------------------------
-    video_analysis_provider: Literal["mock", "gemini", "openai"] = "mock"
+    # ``auto`` picks gemini when GEMINI_API_KEY is set, else openai when OPENAI_API_KEY
+    # is set, otherwise mock. Set explicitly to mock/gemini/openai to override.
+    video_analysis_provider: Literal["auto", "mock", "gemini", "openai"] = "auto"
     video_analysis_model: str = "gemini-2.0-flash"
     max_upload_bytes: int = 52_428_800  # 50 MB
     allowed_upload_mime_types: list[str] = Field(
@@ -101,3 +103,35 @@ def get_settings() -> Settings:
     """Return a cached ``Settings`` instance."""
 
     return Settings()
+
+
+def effective_video_analysis_provider(settings: Settings | None = None) -> Literal["mock", "gemini", "openai"]:
+    """Resolve which video analysis backend to use."""
+
+    s = settings or get_settings()
+    if s.video_analysis_provider != "auto":
+        return s.video_analysis_provider
+    if s.gemini_api_key:
+        return "gemini"
+    if s.openai_api_key:
+        from .services.ffmpeg_utils import ffmpeg_available
+
+        if ffmpeg_available():
+            return "openai"
+    return "mock"
+
+def effective_video_analysis_model(settings: Settings | None = None) -> str:
+    """Pick a model name appropriate for the resolved video analysis provider."""
+
+    s = settings or get_settings()
+    provider = effective_video_analysis_provider(s)
+    model = s.video_analysis_model
+    if provider == "openai":
+        if model.startswith(("gpt-", "o1", "o3", "o4")):
+            return model
+        return s.model_name if s.model_name.startswith(("gpt-", "o1", "o3", "o4")) else "gpt-4o"
+    if provider == "gemini" and model.startswith("gemini"):
+        return model
+    if provider == "gemini":
+        return "gemini-2.0-flash"
+    return model

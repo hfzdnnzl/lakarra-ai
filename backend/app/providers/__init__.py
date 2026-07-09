@@ -31,6 +31,7 @@ class TikTokVideoData:
     video: VideoInfo
     performance: PerformanceMetrics
     comments: list[str] = field(default_factory=list)
+    download_url: str = ""
 
 
 @dataclass

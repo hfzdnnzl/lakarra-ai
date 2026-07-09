@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -191,6 +191,30 @@ class ContentRecommendations(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class VisualReviewPayload(BaseModel):
+    """Multimodal visual review of a published video."""
+
+    analysis_mode: Literal["visual"] = "visual"
+    hook_description: str = ""
+    scene_breakdown: list[str] = Field(default_factory=list)
+    on_screen_text: list[str] = Field(default_factory=list)
+    pacing_notes: str = ""
+    cta_observations: str = ""
+    hook_score: ScoreWithExplanation
+    retention_score: ScoreWithExplanation
+    pacing_score: ScoreWithExplanation
+    storytelling_score: ScoreWithExplanation
+    strongest_timestamp: str = ""
+    weakest_timestamp: str = ""
+    drop_off_points: list[str] = Field(default_factory=list)
+    summary: str = ""
+
+    @field_validator("scene_breakdown", "on_screen_text", "drop_off_points", mode="before")
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
+
+
 class ContentAnalysisPayload(BaseModel):
     """Full analysis of a published Lakarra TikTok video."""
 
@@ -202,6 +226,11 @@ class ContentAnalysisPayload(BaseModel):
     comments: CommentIntelligence
     summary: str
     recommendations: ContentRecommendations = Field(default_factory=ContentRecommendations)
+    visual_review: VisualReviewPayload | None = None
+    analysis_mode: Literal["full", "metrics_only"] = "metrics_only"
+    linked_content_id: str | None = None
+    video_source: Literal["analytics_upload", "tiktok_download", "none"] = "none"
+    visual_analysis_provider: Literal["mock", "gemini", "openai"] | None = None
 
 
 class PatternAnalysisPayload(BaseModel):
@@ -537,8 +566,21 @@ class VideoCatalogItem(BaseModel):
     analysis_version: int | None = None
     analysis_id: str | None = None
     analysis_summary: str | None = None
+    analysis_mode: Literal["full", "metrics_only"] = "metrics_only"
+    visual_analysis_provider: Literal["mock", "gemini", "openai"] | None = None
+    has_video_upload: bool = False;
+    upload_filename: str | None = None
+    visual_review: VisualReviewPayload | None = None
     metrics: VideoMetricsRead
     metrics_priority: str = "normal"
+
+
+class VideoUploadRead(BaseModel):
+    video_id: str
+    original_filename: str
+    mime_type: str
+    file_size: int
+    uploaded_at: datetime
 
 
 class MetricsReadiness(BaseModel):

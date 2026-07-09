@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from io import BytesIO
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ...database.session import get_db
@@ -24,8 +27,10 @@ from ...models.analytics import (
     TrendReportRequest,
     VideoMetricsData,
     VideoMetricsRead,
+    VideoUploadRead,
 )
 from ...services.analytics_service import AnalyticsService
+from ...services.storage_service import get_storage
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -70,9 +75,7 @@ def analyze_video(
     force: bool = False,
     service: AnalyticsService = Depends(_service),
 ) -> AnalysisResponse:
-    result = service.analyze_video(
-        body.video_id, content_id=body.content_id, force=force
-    )
+    result = service.analyze_video(body.video_id, force=force)
     if not result.success:
         raise HTTPException(status_for(result.error_type), detail=result.error)
     return result
@@ -88,6 +91,73 @@ def analyze_video_by_id(
     if not result.success:
         raise HTTPException(status_for(result.error_type), detail=result.error)
     return result
+
+
+@router.post("/videos/{video_id}/upload", response_model=VideoUploadRead, status_code=201)
+async def upload_video(
+    video_id: str,
+    file: UploadFile = File(...),
+    service: AnalyticsService = Depends(_service),
+) -> VideoUploadRead:
+    data = await file.read()
+    mime = file.content_type or "application/octet-stream"
+    try:
+        return service.upload_video_file(
+            video_id,
+            data=data,
+            mime_type=mime,
+            original_filename=file.filename or "upload.mp4",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
+
+
+@router.get("/videos/{video_id}/upload/stream")
+def stream_video_upload(
+    video_id: str,
+    service: AnalyticsService = Depends(_service),
+):
+    row = service.get_video_upload_row(video_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    local_path = get_storage().get_local_path(row.storage_key)
+    if local_path is not None:
+        return FileResponse(
+            local_path,
+            media_type=row.mime_type,
+            filename=row.original_filename,
+            content_disposition_type="inline",
+        )
+    try:
+        data = get_storage().read_object(row.storage_key)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="Upload file not found") from exc
+    return StreamingResponse(
+        BytesIO(data),
+        media_type=row.mime_type,
+        headers={"Content-Disposition": f'inline; filename="{row.original_filename}"'},
+    )
+
+
+@router.delete("/videos/{video_id}/upload", status_code=204)
+def delete_video_upload(
+    video_id: str,
+    service: AnalyticsService = Depends(_service),
+) -> None:
+    try:
+        service.delete_video_upload(video_id)
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
 
 
 @router.post("/videos/analyze-all", response_model=AnalyzeAllResponse)
