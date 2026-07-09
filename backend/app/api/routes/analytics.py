@@ -185,7 +185,14 @@ def decide_review(
 # --- Dashboard reads ---------------------------------------------------------
 @router.get("/overview", response_model=AccountOverview)
 def get_overview(service: AnalyticsService = Depends(_service)) -> AccountOverview:
-    return service.get_overview()
+    try:
+        return service.get_overview()
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
 
 
 @router.get("/content", response_model=ContentAnalyticsPage)

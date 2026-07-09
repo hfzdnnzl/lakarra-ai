@@ -49,7 +49,10 @@ def _client() -> httpx.Client:
 def _get_json(client: httpx.Client, path: str, *, params: dict) -> dict:
     _rate_limit()
     base = get_settings().tiktok_api_base_url.rstrip("/")
-    response = client.get(f"{base}{path}", params=params)
+    try:
+        response = client.get(f"{base}{path}", params=params)
+    except httpx.HTTPError as exc:
+        raise TikTokFetchError(f"TikTok data request failed: {exc}") from exc
     if response.status_code != 200:
         raise TikTokFetchError(
             f"TikTok data request failed (HTTP {response.status_code})."

@@ -134,6 +134,28 @@ class TestAnalyticsService:
         assert overview.total_videos == 5
         assert overview.total_views > 0
 
+    def test_get_overview_degraded_on_tiktok_fetch_error(
+        self, analytics_service: AnalyticsService, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.errors import TikTokFetchError
+        from app.providers import TikTokProvider
+
+        class FailingProvider(TikTokProvider):
+            def get_account(self):
+                raise TikTokFetchError("TikTok data request failed (HTTP 531).")
+
+            def get_video(self, video_id: str):
+                return None
+
+        monkeypatch.setattr(
+            "app.services.analytics_service.build_tiktok_provider",
+            lambda _handle: FailingProvider(),
+        )
+        overview = analytics_service.get_overview()
+        assert overview.account_configured is True
+        assert overview.live_data_error is not None
+        assert overview.total_videos == 0
+
     def test_get_historical(self, analytics_service: AnalyticsService):
         analytics_service.analyze_account()
         historical = analytics_service.get_historical()

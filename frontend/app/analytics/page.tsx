@@ -158,6 +158,15 @@ export default function AnalyticsOverviewPage() {
         <p className="text-muted-foreground">
           Connect your TikTok account above to see performance data and run analyses.
         </p>
+      ) : overview?.live_data_error ? (
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Could not fetch live TikTok data: {overview.live_data_error}. You can still enter
+          metrics manually in{" "}
+          <Link href="/analytics/content" className="underline">
+            Content Analytics
+          </Link>
+          .
+        </div>
       ) : !overview ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (

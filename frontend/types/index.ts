@@ -262,6 +262,7 @@ export interface ReviewRunResponse {
 export interface AccountOverview {
   tiktok_handle?: string | null;
   account_configured: boolean;
+  live_data_error?: string | null;
   account_health_score: number;
   total_videos: number;
   total_views: number;

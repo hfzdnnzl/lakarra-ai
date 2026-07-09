@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 from ..agents import get_agent_context
 from ..agents.content_analyst import ContentAnalystAgent
 from ..config import get_settings
-from ..errors import LakarraError, MetricsIncompleteError, MissingAccountHandleError, NotFoundError
+from ..errors import (
+    LakarraError,
+    MetricsIncompleteError,
+    MissingAccountHandleError,
+    NotFoundError,
+    TikTokFetchError,
+)
 from ..models.analytics import (
     AccountOverview,
     AccountSettingsRead,
@@ -146,7 +152,11 @@ class AnalyticsService:
 
     def get_metrics_readiness(self) -> MetricsReadiness:
         handle = self._require_handle()
-        account = build_tiktok_provider(handle).get_account()
+        try:
+            account = build_tiktok_provider(handle).get_account()
+        except TikTokFetchError as exc:
+            logger.warning("metrics_readiness.tiktok_fetch_failed: %s", exc.message)
+            return MetricsReadiness(ready=False, total_videos=0, complete_videos=0)
         for video in account.videos:
             self._sync_public_metrics(handle, video)
         self.session.commit()
@@ -205,8 +215,36 @@ class AnalyticsService:
     def get_content_page(self) -> ContentAnalyticsPage:
         overview = self.get_overview()
         readiness = self.get_metrics_readiness()
+        if overview.live_data_error:
+            return ContentAnalyticsPage(
+                overview=overview,
+                readiness=readiness,
+                videos=[],
+                required_field_labels={
+                    k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
+                },
+                optional_field_labels={
+                    k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
+                },
+            )
+
         handle = self._require_handle()
-        account = build_tiktok_provider(handle).get_account()
+        try:
+            account = build_tiktok_provider(handle).get_account()
+        except TikTokFetchError as exc:
+            logger.warning("get_content_page.tiktok_fetch_failed: %s", exc.message)
+            overview = overview.model_copy(update={"live_data_error": exc.message})
+            return ContentAnalyticsPage(
+                overview=overview,
+                readiness=readiness,
+                videos=[],
+                required_field_labels={
+                    k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
+                },
+                optional_field_labels={
+                    k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
+                },
+            )
         analyses = self.repo.get_latest_analyses_map()
         sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
@@ -542,7 +580,15 @@ class AnalyticsService:
                 account_configured=False,
             )
 
-        account = build_tiktok_provider(settings.tiktok_handle).get_account()
+        try:
+            account = build_tiktok_provider(settings.tiktok_handle).get_account()
+        except TikTokFetchError as exc:
+            logger.warning("get_overview.tiktok_fetch_failed: %s", exc.message)
+            return AccountOverview(
+                tiktok_handle=settings.tiktok_handle,
+                account_configured=True,
+                live_data_error=exc.message,
+            )
         videos = account.videos
         if not videos:
             return AccountOverview(

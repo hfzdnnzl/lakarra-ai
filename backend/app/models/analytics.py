@@ -298,6 +298,8 @@ class MetricsSnapshotRead(BaseModel):
 class AccountOverview(BaseModel):
     tiktok_handle: str | None = None
     account_configured: bool = False
+    #: Set when live TikTok fetch fails; dashboard still loads with manual metrics path.
+    live_data_error: str | None = None
     account_health_score: float = 0.0
     total_videos: int = 0
     total_views: int = 0
