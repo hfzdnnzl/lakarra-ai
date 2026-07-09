@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.agents import get_agent_context
 from app.agents.content_analyst import ContentAnalystAgent
 from app.main import app
+from app.models.analytics import ContentRecommendations
 from app.providers import MockTikTokProvider, build_internal_content_provider
 from app.repositories.analytics_repository import AnalyticsRepository
 from app.services.analytics_service import AnalyticsService
@@ -31,6 +32,14 @@ def analytics_service(db_session: Session, analyst: ContentAnalystAgent):
 
 
 class TestContentAnalystAgent:
+    def test_content_recommendations_coerces_string_lists(self):
+        rec = ContentRecommendations(
+            posting_schedule="Post on Friday evenings and Saturday mornings.",
+            strategy_gaps="No trend-jacking content this week.",
+        )
+        assert rec.posting_schedule == ["Post on Friday evenings and Saturday mornings."]
+        assert rec.strategy_gaps == ["No trend-jacking content this week."]
+
     def test_analyze_video(self, analyst: ContentAnalystAgent):
         result = analyst.analyze_video("lk-001")
         assert result.payload["video"]["video_id"] == "lk-001"

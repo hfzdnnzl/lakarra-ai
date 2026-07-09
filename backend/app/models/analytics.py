@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -17,6 +18,39 @@ def normalize_tiktok_handle(value: str) -> str:
     """Strip @ and whitespace; lowercase for consistent lookups."""
 
     return value.strip().lstrip("@").lower()
+
+
+def coerce_str_list(value: Any) -> list[str]:
+    """Normalize LLM output where a list field is returned as a single string."""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, list):
+        items: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                items.append(text)
+        return items
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def normalize_unit_ratio(value: Any) -> float:
+    """Accept 0–1 ratios or whole-number percentages from LLM JSON."""
+
+    if value is None:
+        return 0.0
+    ratio = float(value)
+    if ratio > 1.0 and ratio <= 100.0:
+        return ratio / 100.0
+    return ratio
+
 
 # ---------------------------------------------------------------------------
 # Shared building blocks
@@ -27,6 +61,11 @@ class ScoreWithExplanation(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
     explanation: str
 
+    @field_validator("score", mode="before")
+    @classmethod
+    def _normalize_score(cls, value: Any) -> float:
+        return normalize_unit_ratio(value)
+
 
 class VideoInfo(BaseModel):
     video_id: str
@@ -34,6 +73,11 @@ class VideoInfo(BaseModel):
     title: str = ""
     caption: str = ""
     hashtags: list[str] = Field(default_factory=list)
+
+    @field_validator("hashtags", mode="before")
+    @classmethod
+    def _coerce_hashtags(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
     publish_date: str = ""
     publish_time: str = ""
     duration: int = 0
@@ -48,6 +92,11 @@ class PerformanceMetrics(BaseModel):
     average_watch_duration: float = 0.0
     completion_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     retention_curve: list[float] = Field(default_factory=list)
+
+    @field_validator("completion_rate", mode="before")
+    @classmethod
+    def _normalize_completion_rate(cls, value: Any) -> float:
+        return normalize_unit_ratio(value)
     likes: int = 0
     comments: int = 0
     shares: int = 0
@@ -84,6 +133,16 @@ class RetentionAnalysis(BaseModel):
     pacing_issues: list[str] = Field(default_factory=list)
     scene_transition_issues: list[str] = Field(default_factory=list)
 
+    @field_validator(
+        "drop_off_points",
+        "pacing_issues",
+        "scene_transition_issues",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
+
 
 class CommentIntelligence(BaseModel):
     sentiment: str = ""
@@ -93,6 +152,17 @@ class CommentIntelligence(BaseModel):
     purchase_intent: str = ""
     most_common_keywords: list[str] = Field(default_factory=list)
 
+    @field_validator(
+        "repeated_questions",
+        "feature_requests",
+        "customer_objections",
+        "most_common_keywords",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
+
 
 class ContentRecommendations(BaseModel):
     content_categories: list[str] = Field(default_factory=list)
@@ -101,6 +171,19 @@ class ContentRecommendations(BaseModel):
     posting_schedule: list[str] = Field(default_factory=list)
     experiments: list[str] = Field(default_factory=list)
     strategy_gaps: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "content_categories",
+        "content_angles",
+        "hook_improvements",
+        "posting_schedule",
+        "experiments",
+        "strategy_gaps",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +216,19 @@ class PatternAnalysisPayload(BaseModel):
     recurring_successful_formats: list[str] = Field(default_factory=list)
     summary: str = ""
 
+    @field_validator(
+        "best_performing_categories",
+        "best_posting_days",
+        "best_posting_times",
+        "strongest_hooks",
+        "common_failure_patterns",
+        "recurring_successful_formats",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
+
 
 class TrendReportPayload(BaseModel):
     """Trend report generated from historical analysis."""
@@ -143,6 +239,11 @@ class TrendReportPayload(BaseModel):
     account_health_score: float = Field(default=0.0, ge=0.0, le=1.0)
     growth_trend: str = ""
     summary: str = ""
+
+    @field_validator("account_health_score", mode="before")
+    @classmethod
+    def _normalize_health_score(cls, value: Any) -> float:
+        return normalize_unit_ratio(value)
 
 
 class CompetitorAccountData(BaseModel):
@@ -159,6 +260,19 @@ class CompetitorAccountData(BaseModel):
     editing_patterns: list[str] = Field(default_factory=list)
     cta_style: str = ""
 
+    @field_validator(
+        "content_categories",
+        "posting_schedule",
+        "recurring_hooks",
+        "recurring_themes",
+        "video_styles",
+        "editing_patterns",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
+
 
 class CompetitorAnalysisPayload(BaseModel):
     """SWOT-style competitor analysis."""
@@ -170,6 +284,18 @@ class CompetitorAnalysisPayload(BaseModel):
     threats: list[str] = Field(default_factory=list)
     content_ideas: list[str] = Field(default_factory=list)
     summary: str = ""
+
+    @field_validator(
+        "strengths",
+        "weaknesses",
+        "opportunities",
+        "threats",
+        "content_ideas",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
 
 
 class ReviewReportPayload(BaseModel):
@@ -188,6 +314,16 @@ class ReviewReportPayload(BaseModel):
     suggestions: list[str] = Field(default_factory=list)
     confidence_score: float = Field(ge=0.0, le=1.0)
     approval_recommendation: str = ""
+
+    @field_validator("strengths", "weaknesses", "suggestions", mode="before")
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
+
+    @field_validator("confidence_score", mode="before")
+    @classmethod
+    def _normalize_confidence(cls, value: Any) -> float:
+        return normalize_unit_ratio(value)
 
 
 class CommentAnalysisPayload(BaseModel):

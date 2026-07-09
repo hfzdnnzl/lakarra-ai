@@ -147,8 +147,11 @@ class ContentAnalystAgent(BaseAgent):
         try:
             validated = model_cls(**data)
         except ValidationError as exc:
+            first = exc.errors()[0]
+            location = ".".join(str(part) for part in first.get("loc", ()))
+            detail = first.get("msg", "invalid value")
             raise OutputValidationError(
-                f"Analysis output failed validation: {exc.error_count()} error(s)."
+                f"Analysis output failed validation at {location}: {detail}"
             ) from exc
 
         return AgentAnalysisResult(

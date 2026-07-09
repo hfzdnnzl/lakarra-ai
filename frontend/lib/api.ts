@@ -8,7 +8,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!res.ok) {
-    throw new Error(`API ${path} failed: ${res.status}`);
+    let message = `API ${path} failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string" && body.detail.trim()) {
+        message = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        const parts = body.detail
+          .map((item) => {
+            if (typeof item === "string") return item;
+            if (item && typeof item === "object" && "msg" in item) {
+              return String((item as { msg?: string }).msg ?? "");
+            }
+            return "";
+          })
+          .filter(Boolean);
+        if (parts.length > 0) message = parts.join("; ");
+      }
+    } catch {
+      // Keep the generic status message when the body is not JSON.
+    }
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }
