@@ -391,29 +391,63 @@ export interface VideoMetrics {
   metrics_priority: string;
 }
 
-export interface ScoreSummary {
+export interface Evidence {
+  source: string;
+  description: string;
+}
+
+export interface Recommendation {
+  text: string;
+  evidence: Evidence[];
+}
+
+export interface ExecutiveSummary {
+  overall_verdict: string;
+  confidence: string;
+  primary_reason_for_performance: string;
+  biggest_strength: string;
+  biggest_weakness: string;
+  first_priority_action: string;
+}
+
+export interface DimensionSummary {
   label: string;
+  rating: string;
   score: number;
+  confidence: string;
   explanation: string;
 }
 
-export interface VideoRecommendationsSummary {
-  hook_improvements: string[];
-  experiments: string[];
+export interface SceneAnalysis {
+  start_timestamp: string;
+  end_timestamp: string;
+  purpose: string;
+  effectiveness: string;
+  score: number;
+  confidence: string;
+  explanation: string;
+  recommendations: Recommendation[];
 }
 
-export interface VisualReview {
-  hook_description: string;
-  scene_breakdown: string[];
-  on_screen_text: string[];
-  pacing_notes: string;
-  cta_observations: string;
-  strongest_timestamp: string;
-  weakest_timestamp: string;
-  drop_off_points: string[];
-  summary: string;
-  visual_strengths?: string[];
-  visual_weaknesses?: string[];
+export interface RootCause {
+  factor: string;
+  estimated_impact: string;
+  confidence: string;
+  explanation: string;
+  evidence: Evidence[];
+}
+
+export interface VideoAnalysisSummary {
+  executive_summary: ExecutiveSummary;
+  content_ratings: DimensionSummary[];
+  scenes: SceneAnalysis[];
+  top_root_causes: RootCause[];
+  immediate_improvements: Recommendation[];
+  experiments: Recommendation[];
+  future_content_ideas: Recommendation[];
+  performance_summary: string;
+  analysis_mode: "full" | "metrics_only";
+  visual_provider?: string | null;
 }
 
 export interface VideoCatalogItem {
@@ -428,17 +462,9 @@ export interface VideoCatalogItem {
   is_analyzed: boolean;
   analysis_version: number | null;
   analysis_id: string | null;
-  analysis_summary: string | null;
-  analysis_mode?: "full" | "metrics_only";
-  visual_analysis_provider?: "mock" | "gemini" | "openai" | null;
+  analysis?: VideoAnalysisSummary | null;
   has_video_upload?: boolean;
   upload_filename?: string | null;
-  visual_review?: VisualReview | null;
-  strengths?: string[];
-  weaknesses?: string[];
-  priority_improvements?: string[];
-  quality_scores?: ScoreSummary[];
-  recommendations_summary?: VideoRecommendationsSummary;
   metrics: VideoMetrics;
   metrics_priority: string;
 }

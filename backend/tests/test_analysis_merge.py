@@ -1,119 +1,223 @@
-"""Tests for merging visual review into metrics-based analysis."""
+"""Tests for merging pass outputs into unified ContentAnalysis."""
 
 from __future__ import annotations
 
-from app.models.analytics import (
-    CommentIntelligence,
-    ContentAnalysisPayload,
-    ContentRecommendations,
-    EngagementMetrics,
-    PerformanceMetrics,
-    QualityScores,
-    RetentionAnalysis,
-    ScoreWithExplanation,
-    VideoInfo,
-    VisualReviewPayload,
+from app.models.analytics import EngagementMetrics, PerformanceMetrics, VideoInfo
+from app.models.content_analysis import (
+    AudienceAnalysisSection,
+    CategoricalRating,
+    Confidence,
+    ContentAnalysisSection,
+    Evidence,
+    EvidenceSource,
+    Impact,
+    MetricsPassOutput,
+    PerformanceAnalysisSection,
+    PerformanceDiagnosisSection,
+    RatedDimension,
+    Recommendation,
+    RecommendationsSection,
+    RootCause,
+    SceneAnalysis,
+    VisualPassOutput,
 )
-from app.services.analysis_merge import merge_visual_into_content_analysis
+from app.services.analysis_merge import merge_passes, project_video_analysis_summary
 
 
-def _score(value: float, explanation: str) -> ScoreWithExplanation:
-    return ScoreWithExplanation(score=value, explanation=explanation)
+def _dimension(score: int = 5) -> RatedDimension:
+    return RatedDimension(
+        rating=CategoricalRating.AVERAGE,
+        score=score,
+        confidence=Confidence.MEDIUM,
+        explanation="test",
+    )
 
 
-def _metrics_payload() -> ContentAnalysisPayload:
-    return ContentAnalysisPayload(
-        video=VideoInfo(video_id="lk-001", title="Test", caption="Test caption"),
-        performance=PerformanceMetrics(views=100, likes=5, comments=1, shares=1, saves=0),
-        engagement=EngagementMetrics(engagement_rate=0.07),
-        quality_scores=QualityScores(
-            hook_score=_score(0.4, "text hook"),
-            retention_score=_score(0.3, "text retention"),
-            cta_score=_score(0.5, "text cta"),
-            pacing_score=_score(0.4, "text pacing"),
-            storytelling_score=_score(0.4, "text story"),
-            emotional_impact=_score(0.5, "text emotion"),
-            educational_value=_score(0.5, "text edu"),
-            overall_content_health=_score(0.45, "text health"),
+def _metrics_pass() -> MetricsPassOutput:
+    return MetricsPassOutput(
+        audience_analysis=AudienceAnalysisSection(
+            retention_summary="Completion 45%",
+            drop_off_points=["Mid-video"],
+            comment_sentiment="positive",
         ),
-        retention=RetentionAnalysis(
-            strongest_timestamp="unknown",
-            weakest_timestamp="unknown",
-            drop_off_points=["inferred drop"],
-            pacing_issues=["slow middle"],
+        content_analysis_partial=ContentAnalysisSection(
+            hook=_dimension(4),
+            story_script=_dimension(5),
+            voiceover=_dimension(5),
+            pacing=_dimension(5),
         ),
-        comments=CommentIntelligence(),
-        summary="Metrics summary only.",
-        strengths=["Strong save rate for the category"],
-        weaknesses=["Hook could be more provocative in the first second"],
-        priority_improvements=["Test a question-format hook in frame one"],
-        recommendations=ContentRecommendations(
-            hook_improvements=["Try stronger text hook"],
+        performance_diagnosis=PerformanceDiagnosisSection(
+            root_causes=[
+                RootCause(
+                    factor="Weak hook",
+                    estimated_impact=Impact.HIGH,
+                    confidence=Confidence.MEDIUM,
+                    explanation="Early drop-off inferred from completion",
+                    evidence=[
+                        Evidence(
+                            source=EvidenceSource.COMPLETION_RATE,
+                            description="Completion 45%",
+                        )
+                    ],
+                )
+            ]
+        ),
+        recommendations=RecommendationsSection(
+            immediate_improvements=[
+                Recommendation(
+                    text="Strengthen opening hook",
+                    evidence=[
+                        Evidence(
+                            source=EvidenceSource.METRICS,
+                            description="Low completion rate",
+                        )
+                    ],
+                )
+            ],
         ),
     )
 
 
-def _visual_payload() -> VisualReviewPayload:
-    return VisualReviewPayload(
-        hook_description="Opens with product close-up.",
-        scene_breakdown=["0:00 — Hook frame", "0:03 — Reveal"],
-        on_screen_text=["Premium invites"],
-        pacing_notes="Fast opening cuts.",
-        cta_observations="CTA in final frame.",
-        hook_score=_score(0.8, "visual hook"),
-        retention_score=_score(0.7, "visual retention"),
-        pacing_score=_score(0.75, "visual pacing"),
-        storytelling_score=_score(0.72, "visual story"),
-        strongest_timestamp="0:01",
-        weakest_timestamp="0:08",
-        drop_off_points=["Static middle shot"],
-        summary="Visually strong opener.",
-        visual_strengths=["0:00 — Product close-up creates immediate focus"],
-        visual_weaknesses=["0:08 — Static frame may hurt retention"],
+def _visual_pass() -> VisualPassOutput:
+    return VisualPassOutput(
+        content_analysis=ContentAnalysisSection(
+            hook=RatedDimension(
+                rating=CategoricalRating.GOOD,
+                score=8,
+                confidence=Confidence.HIGH,
+                explanation="Strong visual hook at 0:00",
+            ),
+            story_script=_dimension(7),
+            voiceover=_dimension(6),
+            pacing=_dimension(7),
+            scenes=[
+                SceneAnalysis(
+                    start_timestamp="0:00",
+                    end_timestamp="0:03",
+                    purpose="Hook",
+                    effectiveness=CategoricalRating.EXCELLENT,
+                    score=9,
+                    confidence=Confidence.HIGH,
+                    explanation="Product close-up",
+                )
+            ],
+        ),
+        performance_diagnosis=PerformanceDiagnosisSection(
+            root_causes=[
+                RootCause(
+                    factor="Static frame at 0:08",
+                    estimated_impact=Impact.HIGH,
+                    confidence=Confidence.HIGH,
+                    explanation="No motion mid-video",
+                    evidence=[
+                        Evidence(
+                            source=EvidenceSource.SCENE,
+                            description="0:08 — static shot",
+                        )
+                    ],
+                )
+            ]
+        ),
+        recommendations=RecommendationsSection(
+            experiments=[
+                Recommendation(
+                    text="Shorten static scene",
+                    evidence=[
+                        Evidence(
+                            source=EvidenceSource.SCENE,
+                            description="0:08 — holds too long",
+                        )
+                    ],
+                )
+            ],
+        ),
     )
 
 
-class TestAnalysisMerge:
-    def test_metrics_only_when_no_visual(self):
-        merged = merge_visual_into_content_analysis(
-            _metrics_payload(),
+def _performance() -> PerformanceAnalysisSection:
+    return PerformanceAnalysisSection(
+        video=VideoInfo(video_id="lk-001", title="Test"),
+        metrics=PerformanceMetrics(views=1000, likes=50, comments=10, shares=5, saves=20),
+        engagement=EngagementMetrics(engagement_rate=0.085),
+        performance_summary="1000 views, 8.5% engagement.",
+    )
+
+
+class TestMergePasses:
+    def test_metrics_only_produces_unified_analysis(self):
+        merged = merge_passes(
+            _metrics_pass(),
             None,
+            _performance(),
+            analysis_version=1,
             analysis_mode="metrics_only",
             video_source="none",
             linked_content_id=None,
+            metrics_provider="mock",
+            metrics_model="mock",
+            metrics_prompt_version="abc",
         )
-        assert merged.analysis_mode == "metrics_only"
-        assert merged.visual_review is None
-        assert merged.quality_scores.hook_score.score == 0.4
+        assert merged.metadata.analysis_mode == "metrics_only"
+        assert merged.executive_summary.overall_verdict
+        assert merged.content_analysis.hook.score == 4
+        assert "visual_review" not in merged.model_dump()
+        assert len(merged.performance_diagnosis.root_causes) == 1
 
-    def test_visual_overrides_scores_and_retention(self):
-        merged = merge_visual_into_content_analysis(
-            _metrics_payload(),
-            _visual_payload(),
+    def test_full_mode_visual_overrides_content_ratings(self):
+        merged = merge_passes(
+            _metrics_pass(),
+            _visual_pass(),
+            _performance(),
+            analysis_version=1,
             analysis_mode="full",
             video_source="analytics_upload",
             linked_content_id=None,
+            metrics_provider="mock",
+            metrics_model="mock",
+            metrics_prompt_version="abc",
+            visual_provider="mock",
+            visual_model="mock",
+            visual_prompt_version="def",
         )
-        assert merged.analysis_mode == "full"
-        assert merged.video_source == "analytics_upload"
-        assert merged.linked_content_id is None
-        assert merged.quality_scores.hook_score.score == 0.8
-        assert merged.retention.strongest_timestamp == "0:01"
-        assert merged.visual_review is not None
-        assert "Opens with product close-up." in merged.summary
-        assert "Metrics summary only." in merged.summary
-        assert any("visual review" in item.lower() for item in merged.recommendations.hook_improvements)
+        assert merged.metadata.analysis_mode == "full"
+        assert merged.content_analysis.hook.score == 8
+        assert len(merged.content_analysis.scenes) == 1
+        assert len(merged.performance_diagnosis.root_causes) == 2
+        assert merged.recommendations.experiments
 
-    def test_visual_merges_strengths_and_weaknesses(self):
-        merged = merge_visual_into_content_analysis(
-            _metrics_payload(),
-            _visual_payload(),
+    def test_executive_summary_synthesized(self):
+        merged = merge_passes(
+            _metrics_pass(),
+            _visual_pass(),
+            _performance(),
+            analysis_version=1,
             analysis_mode="full",
             video_source="analytics_upload",
             linked_content_id=None,
+            metrics_provider="mock",
+            metrics_model="mock",
+            metrics_prompt_version="abc",
+            visual_provider="mock",
         )
-        assert "Strong save rate for the category" in merged.strengths
-        assert "0:00 — Product close-up creates immediate focus" in merged.strengths
-        assert "Hook could be more provocative in the first second" in merged.weaknesses
-        assert "0:08 — Static frame may hurt retention" in merged.weaknesses
-        assert len(merged.priority_improvements) >= 1
+        assert merged.executive_summary.first_priority_action
+        assert merged.executive_summary.biggest_strength
+        assert merged.executive_summary.biggest_weakness
+
+    def test_project_video_analysis_summary(self):
+        merged = merge_passes(
+            _metrics_pass(),
+            _visual_pass(),
+            _performance(),
+            analysis_version=1,
+            analysis_mode="full",
+            video_source="analytics_upload",
+            linked_content_id=None,
+            metrics_provider="mock",
+            metrics_model="mock",
+            metrics_prompt_version="abc",
+            visual_provider="mock",
+        )
+        summary = project_video_analysis_summary(merged)
+        assert summary.analysis_mode == "full"
+        assert len(summary.content_ratings) == 4
+        assert len(summary.top_root_causes) <= 3

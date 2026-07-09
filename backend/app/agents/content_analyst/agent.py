@@ -15,11 +15,13 @@ from ...config import effective_video_analysis_model, effective_video_analysis_p
 from ...errors import LakarraError, OutputValidationError
 from ...models.analytics import (
     CompetitorAnalysisPayload,
-    ContentAnalysisPayload,
     PatternAnalysisPayload,
     ReviewReportPayload,
     TrendReportPayload,
-    VisualReviewPayload,
+)
+from ...models.content_analysis import (
+    MetricsPassOutput,
+    VisualPassOutput,
 )
 from ...models.content import PerformanceReviewPayload
 from ...models.db import Content
@@ -373,7 +375,7 @@ class ContentAnalystAgent(BaseAgent):
                 "comments": json.dumps(video_data.comments, indent=2),
                 "historical_context": historical_context or "(no historical context)",
             },
-            ContentAnalysisPayload,
+            MetricsPassOutput,
         )
 
     def analyze_video_visual(
@@ -383,7 +385,7 @@ class ContentAnalystAgent(BaseAgent):
         mime_type: str,
         video_data: TikTokVideoData,
         content: Content | None = None,
-    ) -> VisualReviewPayload:
+    ) -> VisualPassOutput:
         """Multimodal visual review of a published video."""
 
         template = load_prompt("content_analyst_video_visual")
@@ -436,7 +438,7 @@ class ContentAnalystAgent(BaseAgent):
         )
         data = parse_review_json(raw)
         try:
-            return VisualReviewPayload(**data)
+            return VisualPassOutput(**data)
         except ValidationError as exc:
             first = exc.errors()[0]
             location = ".".join(str(part) for part in first.get("loc", ()))

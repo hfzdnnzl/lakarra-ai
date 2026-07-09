@@ -6,24 +6,60 @@ import json
 import re
 
 from ..models.analytics import (
-    CommentIntelligence,
     CompetitorAccountData,
     CompetitorAnalysisPayload,
-    ContentAnalysisPayload,
     ContentRecommendations,
-    EngagementMetrics,
     PatternAnalysisPayload,
-    QualityScores,
-    RetentionAnalysis,
     ReviewReportPayload,
     ScoreWithExplanation,
     TrendReportPayload,
 )
+from ..models.content_analysis import (
+    AudienceAnalysisSection,
+    CategoricalRating,
+    Confidence,
+    ContentAnalysisSection,
+    Evidence,
+    EvidenceSource,
+    Impact,
+    MetricsPassOutput,
+    PerformanceDiagnosisSection,
+    RatedDimension,
+    Recommendation,
+    RecommendationsSection,
+    RootCause,
+    SceneAnalysis,
+    VisualPassOutput,
+)
 from ..providers import TikTokVideoData
 
 
-def _score(value: float, explanation: str) -> dict:
-    return {"score": value, "explanation": explanation}
+def _evidence(source: EvidenceSource, description: str) -> Evidence:
+    return Evidence(source=source, description=description)
+
+
+def _rec(text: str, source: EvidenceSource, description: str) -> Recommendation:
+    return Recommendation(text=text, evidence=[_evidence(source, description)])
+
+
+def _dimension(
+    rating: CategoricalRating,
+    score: int,
+    confidence: Confidence,
+    explanation: str,
+    *,
+    strengths: list[str] | None = None,
+    weaknesses: list[str] | None = None,
+) -> RatedDimension:
+    return RatedDimension(
+        rating=rating,
+        score=score,
+        confidence=confidence,
+        explanation=explanation,
+        strengths=strengths or [],
+        weaknesses=weaknesses or [],
+        recommendations=[],
+    )
 
 
 def build_video_analysis_response(
@@ -34,73 +70,244 @@ def build_video_analysis_response(
     v = video_data.video
     p = video_data.performance
     views = max(p.views, 1)
-    engagement = EngagementMetrics(
-        engagement_rate=round((p.likes + p.comments + p.shares + p.saves) / views, 4),
-        share_rate=round(p.shares / views, 4),
-        save_rate=round(p.saves / views, 4),
-        like_to_view_ratio=round(p.likes / views, 4),
-        comment_to_view_ratio=round(p.comments / views, 4),
-        follower_conversion_rate=round(p.followers_gained / views, 4),
-    )
-    payload = ContentAnalysisPayload(
-        video=v,
-        performance=p,
-        engagement=engagement,
-        quality_scores=QualityScores(
-            hook_score=_score_obj(0.78, "Strong opening visual with clear scroll-stop element"),
-            retention_score=_score_obj(p.completion_rate, "Based on completion rate from metrics"),
-            cta_score=_score_obj(0.65, "CTA present but could be more prominent"),
-            pacing_score=_score_obj(0.72, "Good pacing for the duration"),
-            storytelling_score=_score_obj(0.7, "Clear narrative arc"),
-            emotional_impact=_score_obj(0.82, "Emotional resonance with target audience"),
-            educational_value=_score_obj(
-                0.55 if v.content_category != "educational" else 0.85,
-                "Educational value varies by category",
+    save_rate = round(p.saves / views, 4)
+    completion_pct = f"{p.completion_rate * 100:.1f}%"
+
+    payload = MetricsPassOutput(
+        audience_analysis=AudienceAnalysisSection(
+            retention_summary=(
+                f"Completion rate {completion_pct} with average watch "
+                f"{p.average_watch_duration:.1f}s on a {v.duration}s video."
             ),
-            overall_content_health=_score_obj(0.74, "Solid performer with room for optimization"),
-        ),
-        retention=RetentionAnalysis(
-            strongest_timestamp="0:02",
-            weakest_timestamp=f"0:{max(v.duration - 5, 1):02d}",
-            drop_off_points=["Mid-video transition", "Final 3 seconds"],
-            pacing_issues=[] if p.completion_rate > 0.5 else ["Slow middle section"],
-            scene_transition_issues=[],
-        ),
-        comments=CommentIntelligence(
-            sentiment="positive",
+            strongest_timestamp="0:02" if p.completion_rate > 0.4 else "unknown",
+            weakest_timestamp=f"0:{max(v.duration - 3, 1):02d}",
+            drop_off_points=["Mid-video transition may lose viewers"],
+            comment_sentiment="positive",
             repeated_questions=["How much does this cost?", "Can I customize colors?"],
-            feature_requests=["More template options", "Indian wedding themes"],
-            customer_objections=["Prefer paper invites"],
+            feature_requests=["More template options"],
             purchase_intent="moderate-high",
-            most_common_keywords=["beautiful", "wedding", "customize", "link"],
+            audience_observations=[
+                f"Save rate {save_rate:.1%} suggests bookmark intent",
+                "Comments ask pricing questions — purchase consideration present",
+            ],
         ),
-        summary=f"Video '{v.title}' performed well with {p.views:,} views and "
-        f"{engagement.engagement_rate:.1%} engagement rate.",
-        strengths=[
-            f"Engagement rate {engagement.engagement_rate:.1%} — above typical for this category",
-            f"{p.saves:,} saves — strong bookmark intent",
-            "Clear narrative arc keeps viewers through the middle",
-        ],
-        weaknesses=[
-            "CTA could be more prominent in the final frame",
-            "Hook text appears late — risk of early scroll-away",
-            "Mid-video pacing slows when completion rate is below 50%",
-        ],
-        priority_improvements=[
-            "Add bold on-screen hook text in the first 0.5 seconds",
-            "Tighten mid-section cuts to improve completion rate",
-            "End with a clearer verbal and visual CTA",
-        ],
-        recommendations=ContentRecommendations(
-            content_categories=[v.content_category, "testimonial"],
-            content_angles=["Before/after reveal", "Customer reaction"],
-            hook_improvements=["Test question-format hooks", "Add text overlay in first 0.5s"],
-            posting_schedule=["Friday 19:00", "Saturday 11:00"],
-            experiments=["A/B test hook variants", "Try 15s vs 30s duration"],
-            strategy_gaps=["Limited POV content", "No trend-jacking this week"],
+        content_analysis_partial=ContentAnalysisSection(
+            hook=_dimension(
+                CategoricalRating.GOOD if p.completion_rate > 0.35 else CategoricalRating.WEAK,
+                7 if p.completion_rate > 0.35 else 4,
+                Confidence.MEDIUM,
+                (
+                    f"Early retention inferred from {completion_pct} completion — "
+                    "hook likely holds initial attention"
+                ),
+                strengths=["Opening retains enough viewers to reach mid-video"],
+                weaknesses=["Completion below 50% suggests hook could create more curiosity"],
+            ),
+            story_script=_dimension(
+                CategoricalRating.GOOD,
+                7,
+                Confidence.LOW,
+                "Story arc inferred from retention curve — visual confirmation unavailable",
+            ),
+            voiceover=_dimension(
+                CategoricalRating.AVERAGE,
+                5,
+                Confidence.LOW,
+                "No audio/visual evidence in metrics-only pass",
+            ),
+            pacing=_dimension(
+                CategoricalRating.GOOD if p.completion_rate > 0.4 else CategoricalRating.AVERAGE,
+                7 if p.completion_rate > 0.4 else 5,
+                Confidence.MEDIUM,
+                "Pacing inferred from completion and watch duration relative to video length",
+            ),
+            scenes=[],
+        ),
+        performance_diagnosis=PerformanceDiagnosisSection(
+            root_causes=[
+                RootCause(
+                    factor="Hook curiosity gap",
+                    estimated_impact=Impact.HIGH,
+                    confidence=Confidence.MEDIUM,
+                    explanation=(
+                        f"Completion rate {completion_pct} with {p.average_watch_duration:.1f}s "
+                        "average watch suggests viewers leave before the payoff."
+                    ),
+                    evidence=[
+                        _evidence(
+                            EvidenceSource.COMPLETION_RATE,
+                            f"Completion rate is {completion_pct}",
+                        ),
+                        _evidence(
+                            EvidenceSource.WATCH_DURATION,
+                            f"Average watch {p.average_watch_duration:.1f}s vs {v.duration}s total",
+                        ),
+                    ],
+                ),
+                RootCause(
+                    factor="Strong save intent",
+                    estimated_impact=Impact.MEDIUM,
+                    confidence=Confidence.HIGH,
+                    explanation=(
+                        f"Save rate {save_rate:.1%} indicates viewers want to revisit this content."
+                    ),
+                    evidence=[
+                        _evidence(
+                            EvidenceSource.METRICS,
+                            f"{p.saves:,} saves on {p.views:,} views ({save_rate:.1%})",
+                        ),
+                    ],
+                ),
+            ]
+        ),
+        recommendations=RecommendationsSection(
+            immediate_improvements=[
+                _rec(
+                    "Add bold on-screen hook text in the first 0.5 seconds",
+                    EvidenceSource.COMPLETION_RATE,
+                    f"Completion {completion_pct} — early drop-off likely",
+                ),
+            ],
+            experiments=[
+                _rec(
+                    "Test revealing the final invitation in the first frame",
+                    EvidenceSource.RETENTION,
+                    "Retention drops before mid-video — curiosity hook may be weak",
+                ),
+            ],
+            future_content_ideas=[
+                _rec(
+                    "Create a follow-up answering top pricing questions from comments",
+                    EvidenceSource.COMMENTS,
+                    "Repeated questions about cost in comments",
+                ),
+            ],
         ),
     )
-    return json.dumps(payload.model_dump(), indent=2)
+    return json.dumps(payload.model_dump(mode="json"), indent=2)
+
+
+def build_visual_pass_response() -> str:
+    """Mock Pass 2 visual analysis output."""
+
+    scene_rec = Recommendation(
+        text="Add motion to the static product frame at 0:08",
+        evidence=[_evidence(EvidenceSource.SCENE, "0:08 — Static product shot holds too long")],
+    )
+    payload = VisualPassOutput(
+        content_analysis=ContentAnalysisSection(
+            hook=RatedDimension(
+                rating=CategoricalRating.GOOD,
+                score=8,
+                confidence=Confidence.HIGH,
+                explanation="0:00 — Close-up product reveal creates immediate scroll-stop",
+                strengths=["0:00 — Immediate product close-up creates scroll-stop"],
+                weaknesses=["On-screen hook text appears after 1 second"],
+                recommendations=[
+                    Recommendation(
+                        text="Move hook text to frame one",
+                        evidence=[
+                            _evidence(
+                                EvidenceSource.SCENE,
+                                "0:00 — Visual hook strong but text delayed",
+                            )
+                        ],
+                    )
+                ],
+            ),
+            story_script=RatedDimension(
+                rating=CategoricalRating.GOOD,
+                score=7,
+                confidence=Confidence.MEDIUM,
+                explanation="Clear before/after visual arc from reveal to CTA",
+            ),
+            voiceover=RatedDimension(
+                rating=CategoricalRating.AVERAGE,
+                score=6,
+                confidence=Confidence.MEDIUM,
+                explanation="Voiceover supports pacing but lacks urgency in the CTA",
+            ),
+            pacing=RatedDimension(
+                rating=CategoricalRating.GOOD,
+                score=7,
+                confidence=Confidence.HIGH,
+                explanation="Fast cuts in opening; slower middle section",
+            ),
+            scenes=[
+                SceneAnalysis(
+                    start_timestamp="0:00",
+                    end_timestamp="0:03",
+                    purpose="Hook — product close-up with title text",
+                    effectiveness=CategoricalRating.EXCELLENT,
+                    score=9,
+                    confidence=Confidence.HIGH,
+                    explanation="Strong scroll-stop visual with clear brand positioning",
+                    recommendations=[],
+                ),
+                SceneAnalysis(
+                    start_timestamp="0:03",
+                    end_timestamp="0:08",
+                    purpose="Product detail montage",
+                    effectiveness=CategoricalRating.GOOD,
+                    score=7,
+                    confidence=Confidence.MEDIUM,
+                    explanation="Quick cuts maintain momentum",
+                    recommendations=[],
+                ),
+                SceneAnalysis(
+                    start_timestamp="0:08",
+                    end_timestamp="0:12",
+                    purpose="CTA frame",
+                    effectiveness=CategoricalRating.WEAK,
+                    score=4,
+                    confidence=Confidence.HIGH,
+                    explanation="Static product shot with small CTA text",
+                    recommendations=[scene_rec],
+                ),
+            ],
+        ),
+        performance_diagnosis=PerformanceDiagnosisSection(
+            root_causes=[
+                RootCause(
+                    factor="Static mid-video frame",
+                    estimated_impact=Impact.HIGH,
+                    confidence=Confidence.HIGH,
+                    explanation="0:08 — Static product shot likely causes retention drop",
+                    evidence=[
+                        _evidence(
+                            EvidenceSource.SCENE,
+                            "0:08 — No motion or new information for 3+ seconds",
+                        )
+                    ],
+                ),
+            ]
+        ),
+        recommendations=RecommendationsSection(
+            immediate_improvements=[
+                Recommendation(
+                    text="Reduce static product shot below 2 seconds",
+                    evidence=[
+                        _evidence(
+                            EvidenceSource.SCENE,
+                            "0:08 — Static frame holds viewer attention poorly",
+                        )
+                    ],
+                ),
+            ],
+            experiments=[
+                Recommendation(
+                    text="Try revealing the final invitation in the first frame",
+                    evidence=[
+                        _evidence(
+                            EvidenceSource.SCENE,
+                            "0:00 — Strong product visual could serve as payoff tease",
+                        )
+                    ],
+                ),
+            ],
+        ),
+    )
+    return json.dumps(payload.model_dump(mode="json"), indent=2)
 
 
 def _score_obj(value: float, explanation: str) -> ScoreWithExplanation:
@@ -215,7 +422,7 @@ def build_trend_report_response(period: str, patterns: PatternAnalysisPayload) -
 
 def detect_analyst_prompt_type(system_text: str) -> str | None:
     lower = system_text.lower()
-    if "analyze published tiktok videos" in lower:
+    if "metricspassoutput" in lower or "pass 1 metrics" in lower:
         return "video"
     if "historical account performance" in lower:
         return "account"
@@ -237,7 +444,6 @@ def build_analyst_mock_response(system_text: str, user_text: str) -> str | None:
 
     if prompt_type == "video":
         video_id_match = re.search(r'"video_id":\s*"([^"]+)"', user_text)
-        title_match = re.search(r'"title":\s*"([^"]+)"', user_text)
         from ..providers import MockTikTokProvider
 
         provider = MockTikTokProvider("lakarra")

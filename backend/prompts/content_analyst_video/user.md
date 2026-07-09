@@ -1,4 +1,4 @@
-Analyze this Lakarra TikTok video.
+Analyze this Lakarra TikTok video using performance metrics and comments.
 
 ## Video data
 
@@ -16,5 +16,5 @@ Analyze this Lakarra TikTok video.
 
 {{historical_context}}
 
-Produce a complete analysis following the JSON schema. Never generate new content.
-Prioritize actionable strengths and weaknesses tied to the metrics — avoid generic praise.
+Produce the complete MetricsPassOutput JSON schema. Interpret metrics — do not echo raw numbers without analysis.
+Prioritize evidence-based root causes and actionable recommendations.

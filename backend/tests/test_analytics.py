@@ -42,9 +42,9 @@ class TestContentAnalystAgent:
 
     def test_analyze_video(self, analyst: ContentAnalystAgent):
         result = analyst.analyze_video("lk-001")
-        assert result.payload["video"]["video_id"] == "lk-001"
-        assert "engagement" in result.payload
-        assert "quality_scores" in result.payload
+        assert "audience_analysis" in result.payload
+        assert "performance_diagnosis" in result.payload
+        assert "recommendations" in result.payload
 
     def test_analyze_account(self, analyst: ContentAnalystAgent):
         result = analyst.analyze_account()
@@ -101,8 +101,9 @@ class TestAnalyticsService:
         assert resp.analysis_id is not None
         assert resp.version == 1
         assert resp.data is not None
-        assert resp.data.get("analysis_mode") == "metrics_only"
-        assert isinstance(resp.data.get("strengths"), list)
+        assert resp.data.get("metadata", {}).get("analysis_mode") == "metrics_only"
+        assert "executive_summary" in resp.data
+        assert "performance_diagnosis" in resp.data
 
         repo = AnalyticsRepository(db_session)
         rows = repo.list_content_analyses(video_id="lk-001")
@@ -136,10 +137,9 @@ class TestAnalyticsService:
 
         assert resp.success is True
         assert resp.data is not None
-        assert resp.data.get("analysis_mode") == "full"
-        assert resp.data.get("video_source") == "analytics_upload"
-        assert resp.data.get("visual_review") is not None
-        assert resp.data["visual_review"]["hook_description"]
+        assert resp.data.get("metadata", {}).get("analysis_mode") == "full"
+        assert resp.data.get("metadata", {}).get("video_source") == "analytics_upload"
+        assert len(resp.data.get("content_analysis", {}).get("scenes", [])) >= 1
 
     def test_upload_video_file(
         self, analytics_service: AnalyticsService, db_session: Session
@@ -388,8 +388,9 @@ class TestAnalyticsAPI:
       assert len(data["videos"]) == 5
       analyzed = next(v for v in data["videos"] if v["video_id"] == "lk-001")
       assert analyzed["is_analyzed"] is True
-      assert isinstance(analyzed.get("strengths"), list)
-      assert isinstance(analyzed.get("quality_scores"), list)
+      assert analyzed.get("analysis") is not None
+      assert "executive_summary" in analyzed["analysis"]
+      assert isinstance(analyzed["analysis"].get("content_ratings"), list)
 
   def test_update_video_metrics_endpoint(self, client: TestClient):
       resp = client.put(

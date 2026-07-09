@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..agents import get_agent_context
 from ..agents.content_analyst import ContentAnalystAgent
-from ..config import effective_video_analysis_provider, get_settings
+from ..config import effective_video_analysis_model, effective_video_analysis_provider, get_settings
 from ..errors import (
     LakarraError,
     MetricsIncompleteError,
@@ -24,22 +24,23 @@ from ..models.analytics import (
     AnalysisResponse,
     AnalyzeAllResponse,
     CompetitorOverview,
-    ContentAnalysisPayload,
     ContentAnalyticsPage,
     HistoricalAnalytics,
     MetricsReadiness,
     PerformanceMetrics,
     ReviewDecision,
     ReviewQueueItem,
-    ScoreSummary,
     VideoCatalogItem,
     VideoInfo,
     VideoMetricsData,
     VideoMetricsRead,
-    VideoRecommendationsSummary,
     VideoUploadRead,
-    VisualReviewPayload,
     normalize_tiktok_handle,
+)
+from ..models.content_analysis import (
+    ContentAnalysis,
+    MetricsPassOutput,
+    VisualPassOutput,
 )
 from ..providers import (
     TikTokAccountData,
@@ -50,7 +51,9 @@ from ..providers import (
 from ..providers.tiktok_live import LiveTikTokProvider
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
-from .analysis_merge import merge_visual_into_content_analysis
+from .analysis_merge import merge_passes, project_video_analysis_summary
+from .performance_analysis_builder import build_performance_analysis
+from .prompts import load_prompt
 from .storage_service import get_storage
 from .video_metrics import (
     METRIC_FIELD_LABELS,
@@ -73,43 +76,13 @@ def _safe_filename(name: str) -> str:
     return safe if safe and safe not in {".", ".."} else "upload.mp4"
 
 
-def _score_summaries_from_payload(payload: dict) -> list[ScoreSummary]:
-    scores_raw = payload.get("quality_scores")
-    if not isinstance(scores_raw, dict):
-        return []
-    labels = {
-        "hook_score": "Hook",
-        "retention_score": "Retention",
-        "pacing_score": "Pacing",
-        "storytelling_score": "Storytelling",
-        "overall_content_health": "Overall",
-    }
-    summaries: list[ScoreSummary] = []
-    for key, label in labels.items():
-        entry = scores_raw.get(key)
-        if not isinstance(entry, dict):
-            continue
-        score = entry.get("score")
-        if score is None:
-            continue
-        summaries.append(
-            ScoreSummary(
-                label=label,
-                score=float(score),
-                explanation=str(entry.get("explanation") or ""),
-            )
-        )
-    return summaries
-
-
-def _recommendations_summary_from_payload(payload: dict) -> VideoRecommendationsSummary:
-    rec = payload.get("recommendations")
-    if not isinstance(rec, dict):
-        return VideoRecommendationsSummary()
-    return VideoRecommendationsSummary(
-        hook_improvements=rec.get("hook_improvements") or [],
-        experiments=rec.get("experiments") or [],
-    )
+def _video_meta_from_payload(payload: dict) -> dict:
+    perf = payload.get("performance_analysis")
+    if isinstance(perf, dict):
+        video = perf.get("video")
+        if isinstance(video, dict):
+            return video
+    return {}
 
 
 class AnalyticsService:
@@ -248,7 +221,7 @@ class AnalyticsService:
         videos: list[TikTokVideoData] = []
         for row in rows:
             payload = analyses[row.video_id].payload if row.video_id in analyses else {}
-            video_meta = payload.get("video", {})
+            video_meta = _video_meta_from_payload(payload)
             title = video_meta.get("title") or f"Video {row.video_id}"
             videos.append(
                 TikTokVideoData(
@@ -465,15 +438,19 @@ class AnalyticsService:
             upload = uploads_map.get(vid)
             latest = analyses.get(vid)
             payload = latest.payload if latest else {}
-            visual_raw = payload.get("visual_review")
-            visual_review = (
-                VisualReviewPayload(**visual_raw) if isinstance(visual_raw, dict) else None
-            )
             publish_date, publish_time = resolve_publish_metadata(
                 row,
                 default_date=video.video.publish_date,
                 default_time=video.video.publish_time,
             )
+            analysis_summary = None
+            if latest:
+                try:
+                    analysis_summary = project_video_analysis_summary(
+                        ContentAnalysis.model_validate(payload)
+                    )
+                except Exception:  # noqa: BLE001
+                    analysis_summary = None
             catalog.append(
                 VideoCatalogItem(
                     video_id=vid,
@@ -489,17 +466,9 @@ class AnalyticsService:
                     is_analyzed=latest is not None,
                     analysis_version=latest.version if latest else None,
                     analysis_id=latest.id if latest else None,
-                    analysis_summary=payload.get("summary"),
-                    analysis_mode=payload.get("analysis_mode", "metrics_only"),
-                    visual_analysis_provider=payload.get("visual_analysis_provider"),
+                    analysis=analysis_summary,
                     has_video_upload=upload is not None,
                     upload_filename=upload.original_filename if upload else None,
-                    visual_review=visual_review,
-                    strengths=payload.get("strengths") or [],
-                    weaknesses=payload.get("weaknesses") or [],
-                    priority_improvements=payload.get("priority_improvements") or [],
-                    quality_scores=_score_summaries_from_payload(payload),
-                    recommendations_summary=_recommendations_summary_from_payload(payload),
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
                 )
@@ -765,35 +734,50 @@ class AnalyticsService:
             metrics_result = self._analyst._analyze_video_data(  # noqa: SLF001
                 video_data, historical_context=historical
             )
-            metrics_payload = ContentAnalysisPayload(**metrics_result.payload)
+            metrics_pass = MetricsPassOutput(**metrics_result.payload)
+
+            metrics_row = self.repo.get_video_metrics(video_id)
+            performance_section = build_performance_analysis(
+                video_data, metrics_row=metrics_row
+            )
 
             source = resolve_video_source(
                 self.session,
                 video_id=video_id,
                 tiktok_handle=handle,
             )
-            visual_review: VisualReviewPayload | None = None
+            visual_pass: VisualPassOutput | None = None
             visual_provider: str | None = None
+            visual_model: str | None = None
+            visual_prompt_version: str | None = None
             if source.bytes:
                 visual_provider = effective_video_analysis_provider()
-                visual_review = self._analyst.analyze_video_visual(
+                visual_model = effective_video_analysis_model()
+                visual_pass = self._analyst.analyze_video_visual(
                     video_bytes=source.bytes,
                     mime_type=source.mime_type,
                     video_data=video_data,
                     content=None,
                 )
-
-            merged = merge_visual_into_content_analysis(
-                metrics_payload,
-                visual_review,
-                analysis_mode="full" if visual_review else "metrics_only",
-                video_source=source.source,
-                linked_content_id=None,
-                visual_analysis_provider=visual_provider,
-            )
-            merged_payload = merged.model_dump()
+                visual_prompt_version = load_prompt("content_analyst_video_visual").version
 
             version = self.repo.next_content_analysis_version(video_id)
+            merged = merge_passes(
+                metrics_pass,
+                visual_pass,
+                performance_section,
+                analysis_version=version,
+                analysis_mode="full" if visual_pass else "metrics_only",
+                video_source=source.source,
+                linked_content_id=content_id,
+                metrics_provider=metrics_result.provider,
+                metrics_model=metrics_result.model,
+                metrics_prompt_version=metrics_result.prompt_version,
+                visual_provider=visual_provider,
+                visual_model=visual_model,
+                visual_prompt_version=visual_prompt_version,
+            )
+            merged_payload = merged.model_dump(mode="json")
             row = self.repo.save_content_analysis(
                 video_id=video_id,
                 content_id=None,
@@ -1215,9 +1199,14 @@ class AnalyticsService:
         )
 
     def _save_engagement_snapshots(self, payload: dict) -> None:
-        engagement = payload.get("engagement", {})
-        video = payload.get("video", {})
-        vid = video.get("video_id", "unknown")
+        perf = payload.get("performance_analysis", {})
+        if not isinstance(perf, dict):
+            return
+        engagement = perf.get("engagement", {})
+        video = perf.get("video", {})
+        vid = video.get("video_id", "unknown") if isinstance(video, dict) else "unknown"
+        if not isinstance(engagement, dict):
+            return
         for metric, value in engagement.items():
             if isinstance(value, (int, float)):
                 self.repo.save_metrics_snapshot(

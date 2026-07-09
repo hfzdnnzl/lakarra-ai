@@ -64,6 +64,23 @@ function metricDisplayValue(metrics: VideoMetrics, field: string): number | null
   return typeof value === "number" ? value : null;
 }
 
+function formatRating(rating: string) {
+  return rating.charAt(0).toUpperCase() + rating.slice(1);
+}
+
+function EvidenceList({ items }: { items: { source: string; description: string }[] }) {
+  if (!items.length) return null;
+  return (
+    <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs text-muted-foreground">
+      {items.map((item) => (
+        <li key={`${item.source}-${item.description}`}>
+          <span className="font-medium text-foreground/80">{item.source}:</span> {item.description}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function VideoAnalyticsCard({
   video,
   requiredLabels,
@@ -301,8 +318,8 @@ export function VideoAnalyticsCard({
               ) : (
                 <Badge variant="warning">Not analyzed</Badge>
               )}
-              {video.is_analyzed ? (
-                video.analysis_mode === "full" ? (
+              {video.is_analyzed && video.analysis ? (
+                video.analysis.analysis_mode === "full" ? (
                   <Badge variant="success">Full analysis</Badge>
                 ) : (
                   <Badge variant="muted">Metrics only</Badge>
@@ -311,7 +328,7 @@ export function VideoAnalyticsCard({
               {video.has_video_upload ? (
                 <Badge variant="outline">Video uploaded</Badge>
               ) : null}
-              {video.analysis_mode === "full" && video.visual_analysis_provider === "mock" ? (
+              {video.analysis?.analysis_mode === "full" && video.analysis.visual_provider === "mock" ? (
                 <Badge variant="warning">Demo visual analysis</Badge>
               ) : null}
               {video.metrics.required_complete ? (
@@ -365,119 +382,136 @@ export function VideoAnalyticsCard({
             </div>
           ) : null}
 
-          {video.analysis_summary ? (
-            <p className="rounded-md bg-muted px-3 py-2 text-muted-foreground">
-              {video.analysis_summary}
-            </p>
-          ) : null}
-
-          {video.is_analyzed && (video.strengths?.length ?? 0) > 0 ? (
-            <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50/60 p-3">
-              <div className="font-medium text-emerald-900">What&apos;s working</div>
-              <ul className="list-inside list-disc space-y-1 text-emerald-900/90">
-                {video.strengths!.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {video.is_analyzed && (video.weaknesses?.length ?? 0) > 0 ? (
-            <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50/60 p-3">
-              <div className="font-medium text-amber-900">What to improve</div>
-              <ul className="list-inside list-disc space-y-1 text-amber-900/90">
-                {video.weaknesses!.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {video.is_analyzed && (video.priority_improvements?.length ?? 0) > 0 ? (
-            <div className="space-y-2 rounded-md border p-3">
-              <div className="font-medium">Priority actions</div>
-              <ol className="list-inside list-decimal space-y-1 text-muted-foreground">
-                {video.priority_improvements!.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
-
-          {video.is_analyzed && (video.quality_scores?.length ?? 0) > 0 ? (
-            <div className="space-y-2 rounded-md border p-3">
-              <div className="font-medium">Content scores</div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {video.quality_scores!.map((score) => (
-                  <div
-                    key={score.label}
-                    className="rounded-md bg-muted/50 px-3 py-2"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{score.label}</span>
-                      <span className="text-sm tabular-nums">
-                        {(score.score * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    {score.explanation ? (
-                      <p className="mt-1 text-xs text-muted-foreground">{score.explanation}</p>
-                    ) : null}
-                  </div>
-                ))}
+          {video.is_analyzed && video.analysis ? (
+            <>
+              <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+                <div className="font-medium">Executive summary</div>
+                <p className="text-muted-foreground">{video.analysis.executive_summary.overall_verdict}</p>
+                <p className="text-sm">
+                  <span className="font-medium text-foreground">Why: </span>
+                  {video.analysis.executive_summary.primary_reason_for_performance}
+                </p>
+                <p className="text-sm">
+                  <span className="font-medium text-emerald-800">Strength: </span>
+                  {video.analysis.executive_summary.biggest_strength}
+                </p>
+                <p className="text-sm">
+                  <span className="font-medium text-amber-800">Weakness: </span>
+                  {video.analysis.executive_summary.biggest_weakness}
+                </p>
+                <p className="text-sm">
+                  <span className="font-medium text-foreground">First action: </span>
+                  {video.analysis.executive_summary.first_priority_action}
+                </p>
               </div>
-            </div>
-          ) : null}
 
-          {video.is_analyzed &&
-          (video.recommendations_summary?.experiments?.length ?? 0) > 0 ? (
-            <div className="space-y-2 rounded-md border p-3">
-              <div className="font-medium">Experiments to try</div>
-              <ul className="list-inside list-disc space-y-1 text-muted-foreground">
-                {video.recommendations_summary!.experiments.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+              {video.analysis.content_ratings.length > 0 ? (
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="font-medium">Content ratings</div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {video.analysis.content_ratings.map((rating) => (
+                      <div key={rating.label} className="rounded-md bg-muted/50 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium">{rating.label}</span>
+                          <span className="text-sm tabular-nums">
+                            {formatRating(rating.rating)} · {rating.score}/10
+                          </span>
+                        </div>
+                        {rating.explanation ? (
+                          <p className="mt-1 text-xs text-muted-foreground">{rating.explanation}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
-          {video.visual_review ? (
-            <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-              <div className="font-medium">Visual review</div>
-              {video.analysis_mode === "full" && video.visual_analysis_provider === "mock" ? (
-                <p className="text-xs text-amber-700">
-                  This visual review used placeholder data. Re-analyze after configuring a real
-                  video analysis provider (Gemini recommended) in backend settings.
-                </p>
-              ) : null}
-              {video.visual_review.hook_description ? (
-                <p>
-                  <span className="font-medium text-foreground">Hook: </span>
-                  {video.visual_review.hook_description}
-                </p>
-              ) : null}
-              {video.visual_review.scene_breakdown.length > 0 ? (
-                <div>
-                  <div className="mb-1 font-medium text-foreground">Scenes</div>
-                  <ul className="list-inside list-disc space-y-1 text-muted-foreground">
-                    {video.visual_review.scene_breakdown.map((scene) => (
-                      <li key={scene}>{scene}</li>
+              {video.analysis.scenes.length > 0 ? (
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="font-medium">Scene timeline</div>
+                  <ul className="space-y-2 text-muted-foreground">
+                    {video.analysis.scenes.map((scene) => (
+                      <li key={`${scene.start_timestamp}-${scene.end_timestamp}`} className="rounded-md bg-muted/40 px-3 py-2">
+                        <div className="font-medium text-foreground">
+                          {scene.start_timestamp}–{scene.end_timestamp}: {scene.purpose}
+                        </div>
+                        <p className="text-xs">
+                          {formatRating(scene.effectiveness)} · {scene.score}/10 — {scene.explanation}
+                        </p>
+                      </li>
                     ))}
                   </ul>
                 </div>
               ) : null}
-              {video.visual_review.on_screen_text.length > 0 ? (
-                <p>
-                  <span className="font-medium text-foreground">On-screen text: </span>
-                  {video.visual_review.on_screen_text.join(" · ")}
-                </p>
+
+              {video.analysis.top_root_causes.length > 0 ? (
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="font-medium">Root causes</div>
+                  <ol className="list-inside list-decimal space-y-2 text-muted-foreground">
+                    {video.analysis.top_root_causes.map((cause) => (
+                      <li key={cause.factor}>
+                        <span className="font-medium text-foreground">{cause.factor}</span>
+                        <span className="text-xs uppercase text-muted-foreground">
+                          {" "}
+                          · {cause.estimated_impact} impact · {cause.confidence} confidence
+                        </span>
+                        <p className="text-sm">{cause.explanation}</p>
+                        <EvidenceList items={cause.evidence} />
+                      </li>
+                    ))}
+                  </ol>
+                </div>
               ) : null}
-              {video.visual_review.pacing_notes ? (
-                <p>
-                  <span className="font-medium text-foreground">Pacing: </span>
-                  {video.visual_review.pacing_notes}
-                </p>
+
+              {video.analysis.immediate_improvements.length > 0 ? (
+                <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50/60 p-3">
+                  <div className="font-medium text-emerald-900">Immediate improvements</div>
+                  <ul className="space-y-2 text-emerald-900/90">
+                    {video.analysis.immediate_improvements.map((item) => (
+                      <li key={item.text}>
+                        {item.text}
+                        <EvidenceList items={item.evidence} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
-            </div>
+
+              {video.analysis.experiments.length > 0 ? (
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="font-medium">Experiments to try</div>
+                  <ul className="space-y-2 text-muted-foreground">
+                    {video.analysis.experiments.map((item) => (
+                      <li key={item.text}>
+                        {item.text}
+                        <EvidenceList items={item.evidence} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {video.analysis.future_content_ideas.length > 0 ? (
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="font-medium">Future content ideas</div>
+                  <ul className="space-y-2 text-muted-foreground">
+                    {video.analysis.future_content_ideas.map((item) => (
+                      <li key={item.text}>
+                        {item.text}
+                        <EvidenceList items={item.evidence} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {video.analysis.performance_summary ? (
+                <details className="rounded-md border p-3">
+                  <summary className="cursor-pointer font-medium">Performance facts</summary>
+                  <p className="mt-2 text-sm text-muted-foreground">{video.analysis.performance_summary}</p>
+                </details>
+              ) : null}
+            </>
           ) : null}
 
           <div className="space-y-2 rounded-md border p-3">

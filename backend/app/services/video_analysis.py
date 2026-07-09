@@ -54,53 +54,14 @@ class MockVideoAnalysisService(VideoAnalysisService):
         )
         is_visual = (
             "content_analyst_video_visual" in review_prompt.lower()
-            or '"analysis_mode": "visual"' in review_prompt
-            or "visual review" in review_prompt.lower()
+            or "visualpassoutput" in review_prompt.lower()
+            or "pass 2 visual" in review_prompt.lower()
         )
 
         if is_visual:
-            return json.dumps(
-                {
-                    "analysis_mode": "visual",
-                    "hook_description": "Opens with a close-up product reveal in the first second.",
-                    "scene_breakdown": [
-                        "0:00 — Hook frame with on-screen title text.",
-                        "0:03 — Product detail montage with quick cuts.",
-                        "0:08 — Final CTA frame with brand handle.",
-                    ],
-                    "on_screen_text": ["Simple. Premium. Effortless."],
-                    "pacing_notes": "Fast cuts in the opening; slower middle section.",
-                    "cta_observations": "CTA appears in the final two seconds.",
-                    "hook_score": {
-                        "score": 0.76,
-                        "explanation": "Strong scroll-stop visual in the first frame.",
-                    },
-                    "retention_score": {
-                        "score": 0.62,
-                        "explanation": "Visual progression slows mid-video.",
-                    },
-                    "pacing_score": {
-                        "score": 0.7,
-                        "explanation": "Opening pace is strong for short-form.",
-                    },
-                    "storytelling_score": {
-                        "score": 0.68,
-                        "explanation": "Clear before/after visual arc.",
-                    },
-                    "strongest_timestamp": "0:01",
-                    "weakest_timestamp": "0:10",
-                    "drop_off_points": ["Mid-video static product shot"],
-                    "summary": "Visually polished short-form clip with a strong opening frame.",
-                    "visual_strengths": [
-                        "0:00 — Immediate product close-up creates scroll-stop",
-                        "Clean on-screen typography supports brand positioning",
-                    ],
-                    "visual_weaknesses": [
-                        "0:08 — Static product shot may cause mid-video drop-off",
-                        "CTA text is small and easy to miss in the final frame",
-                    ],
-                }
-            )
+            from .analytics_mock import build_visual_pass_response
+
+            return build_visual_pass_response()
 
         if is_fidelity:
             return json.dumps(
