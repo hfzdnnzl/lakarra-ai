@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, TrendingUp } from "lucide-react";
 
-import { AnalyticsNav } from "@/components/AnalyticsNav";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,7 +53,6 @@ export default function TrendReportsPage() {
           </Button>
         }
       />
-      <AnalyticsNav />
       {error ? (
         <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}

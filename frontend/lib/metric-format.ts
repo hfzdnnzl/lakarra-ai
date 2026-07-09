@@ -55,3 +55,39 @@ export function percentToRatio(value: string): number | null {
   }
   return Math.min(1, Math.max(0, pct / 100));
 }
+
+export function hasSavedMetrics(metrics: {
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  saves?: number | null;
+}): boolean {
+  return (
+    metrics.views != null ||
+    metrics.likes != null ||
+    metrics.comments != null ||
+    metrics.shares != null ||
+    metrics.saves != null
+  );
+}
+
+export function formatMetricDisplay(
+  field: string,
+  value: number | null | undefined,
+): string {
+  if (value == null || Number.isNaN(value)) {
+    return "—";
+  }
+  if (field === "watch_time") {
+    return secondsToHms(value) || "—";
+  }
+  if (field === "completion_rate") {
+    const pct = ratioToPercent(value);
+    return pct ? `${pct}%` : "—";
+  }
+  if (field === "average_watch_duration") {
+    return `${value}s`;
+  }
+  return value.toLocaleString();
+}

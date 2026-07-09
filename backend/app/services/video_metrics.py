@@ -95,3 +95,16 @@ def apply_metrics_to_performance(
         merged["like_to_view_ratio"] = round(likes / views, 4)
         merged["comment_to_view_ratio"] = round(comments / views, 4)
     return merged
+
+
+def video_display_label(*, title: str = "", caption: str = "") -> str:
+    """Human-readable label — prefer TikTok caption over generic video ids."""
+
+    cap = caption.strip()
+    if cap:
+        first_line = cap.split("\n")[0].strip()
+        return first_line[:120] if first_line else cap[:120]
+    cleaned = title.strip()
+    if cleaned and not cleaned.lower().startswith("video "):
+        return cleaned[:120]
+    return cleaned or "Untitled video"

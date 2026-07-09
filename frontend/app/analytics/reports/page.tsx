@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { AnalyticsNav } from "@/components/AnalyticsNav";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,7 +43,6 @@ export default function HistoricalReportsPage() {
         title="Historical Reports"
         description="All versioned analyses persisted by the Content Analyst."
       />
-      <AnalyticsNav />
       {error ? (
         <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}

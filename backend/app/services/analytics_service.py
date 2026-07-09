@@ -51,6 +51,7 @@ from .video_metrics import (
     metrics_complete,
     metrics_from_row,
     missing_required,
+    video_display_label,
 )
 
 logger = logging.getLogger("lakarra.analytics_service")
@@ -284,7 +285,7 @@ class AnalyticsService:
         recent = [
             {
                 "video_id": v.video.video_id,
-                "title": v.video.title,
+                "title": video_display_label(title=v.video.title, caption=v.video.caption),
                 "views": v.performance.views,
                 "category": v.video.content_category,
                 "publish_date": v.video.publish_date,
@@ -294,7 +295,7 @@ class AnalyticsService:
         best = [
             {
                 "video_id": v.video.video_id,
-                "title": v.video.title,
+                "title": video_display_label(title=v.video.title, caption=v.video.caption),
                 "views": v.performance.views,
                 "engagement_rate": round(
                     (v.performance.likes + v.performance.comments) / max(v.performance.views, 1),
@@ -306,7 +307,7 @@ class AnalyticsService:
         worst = [
             {
                 "video_id": v.video.video_id,
-                "title": v.video.title,
+                "title": video_display_label(title=v.video.title, caption=v.video.caption),
                 "views": v.performance.views,
             }
             for v in sorted_by_views[-3:]
@@ -322,6 +323,7 @@ class AnalyticsService:
         trends = [
             {
                 "video_id": v.video.video_id,
+                "title": video_display_label(title=v.video.title, caption=v.video.caption),
                 "views": v.performance.views,
                 "publish_date": v.video.publish_date,
             }
@@ -368,7 +370,9 @@ class AnalyticsService:
                 incomplete.append(
                     {
                         "video_id": vid,
-                        "title": video.video.title,
+                        "title": video_display_label(
+                            title=video.video.title, caption=video.video.caption
+                        ),
                         "missing_required": missing_required(data),
                     }
                 )
@@ -407,7 +411,9 @@ class AnalyticsService:
             catalog.append(
                 VideoCatalogItem(
                     video_id=vid,
-                    title=video.video.title,
+                    title=video_display_label(
+                        title=video.video.title, caption=video.video.caption
+                    ),
                     url=video.video.url,
                     caption=video.video.caption,
                     publish_date=video.video.publish_date,

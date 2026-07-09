@@ -288,6 +288,7 @@ export interface AccountOverview {
   posting_heatmap: Record<string, number>;
   performance_trends: Array<{
     video_id: string;
+    title?: string;
     views: number;
     publish_date: string;
   }>;

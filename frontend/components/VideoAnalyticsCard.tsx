@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, Save } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Save,
+  X,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,27 +19,42 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import {
+  formatMetricDisplay,
+  hasSavedMetrics,
   hmsToSeconds,
   percentToRatio,
   ratioToPercent,
   secondsToHms,
 } from "@/lib/metric-format";
-import type { VideoCatalogItem } from "@/types";
+import { videoDisplayLabel } from "@/lib/video-label";
+import { cn } from "@/lib/utils";
+import type { VideoCatalogItem, VideoMetrics } from "@/types";
 
 type Props = {
   video: VideoCatalogItem;
   requiredLabels: Record<string, string>;
   optionalLabels: Record<string, string>;
   onUpdated: () => void;
+  expandAll?: boolean;
 };
+
+function cloneMetrics(metrics: VideoMetrics) {
+  return { ...metrics };
+}
 
 export function VideoAnalyticsCard({
   video,
   requiredLabels,
   optionalLabels,
   onUpdated,
+  expandAll,
 }: Props) {
-  const [form, setForm] = useState({ ...video.metrics });
+  const label = videoDisplayLabel(video);
+  const [expanded, setExpanded] = useState(
+    expandAll ?? !video.metrics.required_complete,
+  );
+  const [editing, setEditing] = useState(() => !hasSavedMetrics(video.metrics));
+  const [form, setForm] = useState(() => cloneMetrics(video.metrics));
   const [watchTimeDisplay, setWatchTimeDisplay] = useState(() =>
     secondsToHms(video.metrics.watch_time),
   );
@@ -42,17 +65,32 @@ export function VideoAnalyticsCard({
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setForm({ ...video.metrics });
+  const resetForm = useCallback(() => {
+    setForm(cloneMetrics(video.metrics));
     setWatchTimeDisplay(secondsToHms(video.metrics.watch_time));
     setCompletionDisplay(ratioToPercent(video.metrics.completion_rate));
-  }, [video.metrics, video.video_id]);
+  }, [video.metrics]);
+
+  useEffect(() => {
+    resetForm();
+    setEditing(!hasSavedMetrics(video.metrics));
+  }, [video.metrics, video.video_id, resetForm]);
+
+  useEffect(() => {
+    setExpanded(expandAll ?? !video.metrics.required_complete);
+  }, [expandAll, video.metrics.required_complete]);
 
   const setNum = (field: string, value: string) => {
     setForm((prev) => ({
       ...prev,
       [field]: value === "" ? null : Number(value),
     }));
+  };
+
+  const cancelEdit = () => {
+    resetForm();
+    setEditing(false);
+    setError(null);
   };
 
   const saveMetrics = async () => {
@@ -86,6 +124,7 @@ export function VideoAnalyticsCard({
         link_clicks: form.link_clicks ?? undefined,
         user_notes: form.user_notes ?? undefined,
       });
+      setEditing(false);
       onUpdated();
     } catch (e) {
       setError((e as Error).message);
@@ -107,33 +146,119 @@ export function VideoAnalyticsCard({
     }
   };
 
-  const showOptional = video.metrics_priority === "high";
+  const renderOptionalField = (field: string, labelText: string, readOnly: boolean) => {
+    if (field === "watch_time") {
+      return (
+        <div key={field} className="space-y-1">
+          <Label htmlFor={`${video.video_id}-${field}-opt`}>{labelText}</Label>
+          {readOnly ? (
+            <p className="rounded-md bg-muted/60 px-3 py-2 text-sm">
+              {formatMetricDisplay(field, form.watch_time ?? null)}
+            </p>
+          ) : (
+            <Input
+              id={`${video.video_id}-${field}-opt`}
+              type="text"
+              inputMode="numeric"
+              placeholder="0:05:30"
+              value={watchTimeDisplay}
+              onChange={(e) => setWatchTimeDisplay(e.target.value)}
+            />
+          )}
+        </div>
+      );
+    }
+    if (field === "completion_rate") {
+      return (
+        <div key={field} className="space-y-1">
+          <Label htmlFor={`${video.video_id}-${field}-opt`}>{labelText}</Label>
+          {readOnly ? (
+            <p className="rounded-md bg-muted/60 px-3 py-2 text-sm">
+              {formatMetricDisplay(field, form.completion_rate ?? null)}
+            </p>
+          ) : (
+            <div className="relative">
+              <Input
+                id={`${video.video_id}-${field}-opt`}
+                type="text"
+                inputMode="decimal"
+                placeholder="45"
+                className="pr-8"
+                value={completionDisplay}
+                onChange={(e) => setCompletionDisplay(e.target.value)}
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                %
+              </span>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div key={field} className="space-y-1">
+        <Label htmlFor={`${video.video_id}-${field}-opt`}>{labelText}</Label>
+        {readOnly ? (
+          <p className="rounded-md bg-muted/60 px-3 py-2 text-sm">
+            {formatMetricDisplay(field, form[field as keyof VideoMetrics] as number | null)}
+          </p>
+        ) : (
+          <Input
+            id={`${video.video_id}-${field}-opt`}
+            type="number"
+            min={0}
+            step="1"
+            value={form[field as keyof typeof form] ?? ""}
+            onChange={(e) => setNum(field, e.target.value)}
+          />
+        )}
+      </div>
+    );
+  };
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-base">{video.title}</CardTitle>
-            <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <span>{video.publish_date || "—"}</span>
-              <span>{video.duration}s</span>
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-3">
+        <div className="flex items-start gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-0.5 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-expanded={expanded}
+            aria-label={expanded ? "Collapse metrics" : "Expand metrics"}
+          >
+            {expanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <CardTitle className="line-clamp-2 text-base leading-snug">{label}</CardTitle>
+            <div className="mt-1.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span>{video.publish_date || "No date"}</span>
+              {video.duration ? <span>{video.duration}s</span> : null}
               {video.is_analyzed ? (
                 <Badge variant="success">Analyzed v{video.analysis_version}</Badge>
               ) : (
                 <Badge variant="warning">Not analyzed</Badge>
               )}
-              {video.metrics_priority === "high" ? (
-                <Badge variant="muted">Best/worst — optional metrics recommended</Badge>
-              ) : null}
               {video.metrics.required_complete ? (
-                <Badge variant="success">Required metrics complete</Badge>
+                <Badge variant="success">Metrics complete</Badge>
               ) : (
-                <Badge variant="destructive">Required metrics incomplete</Badge>
+                <Badge variant="destructive">Metrics needed</Badge>
               )}
             </div>
+            {!expanded && hasSavedMetrics(video.metrics) ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {formatMetricDisplay("views", video.metrics.views)} views ·{" "}
+                {formatMetricDisplay("likes", video.metrics.likes)} likes
+              </p>
+            ) : null}
           </div>
-          <div className="flex gap-2">
+
+          <div className="flex shrink-0 gap-2">
             {!video.is_analyzed ? (
               <Button
                 size="sm"
@@ -161,112 +286,109 @@ export function VideoAnalyticsCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        {error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700">
-            {error}
+
+      {expanded ? (
+        <CardContent className={cn("space-y-4 border-t pt-4 text-sm")}>
+          {error ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700">
+              {error}
+            </div>
+          ) : null}
+
+          {video.analysis_summary ? (
+            <p className="rounded-md bg-muted px-3 py-2 text-muted-foreground">
+              {video.analysis_summary}
+            </p>
+          ) : null}
+
+          {video.caption && video.caption !== label ? (
+            <p className="line-clamp-3 text-xs text-muted-foreground">{video.caption}</p>
+          ) : null}
+
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-medium">Metrics</div>
+            {!editing && hasSavedMetrics(form) ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}>
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                Edit
+              </Button>
+            ) : null}
           </div>
-        ) : null}
 
-        {video.analysis_summary ? (
-          <p className="rounded-md bg-muted px-3 py-2 text-muted-foreground">{video.analysis_summary}</p>
-        ) : null}
-
-        <div>
-          <div className="mb-2 font-medium">Required metrics (from TikTok Studio)</div>
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-            {Object.entries(requiredLabels).map(([field, label]) => (
-              <div key={field} className="space-y-1">
-                <Label htmlFor={`${video.video_id}-${field}`}>{label}</Label>
-                <Input
-                  id={`${video.video_id}-${field}`}
-                  type="number"
-                  min={0}
-                  value={form[field as keyof typeof form] ?? ""}
-                  onChange={(e) => setNum(field, e.target.value)}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {showOptional ? (
           <div>
-            <div className="mb-2 font-medium text-muted-foreground">
-              Optional metrics (recommended for this best/worst performer)
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Required · TikTok Studio
             </div>
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-              {Object.entries(optionalLabels).map(([field, label]) => {
-                if (field === "watch_time") {
-                  return (
-                    <div key={field} className="space-y-1">
-                      <Label htmlFor={`${video.video_id}-${field}-opt`}>{label}</Label>
-                      <Input
-                        id={`${video.video_id}-${field}-opt`}
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0:05:30"
-                        value={watchTimeDisplay}
-                        onChange={(e) => setWatchTimeDisplay(e.target.value)}
-                      />
-                    </div>
-                  );
-                }
-                if (field === "completion_rate") {
-                  return (
-                    <div key={field} className="space-y-1">
-                      <Label htmlFor={`${video.video_id}-${field}-opt`}>{label}</Label>
-                      <div className="relative">
-                        <Input
-                          id={`${video.video_id}-${field}-opt`}
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="45"
-                          className="pr-8"
-                          value={completionDisplay}
-                          onChange={(e) => setCompletionDisplay(e.target.value)}
-                        />
-                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                          %
-                        </span>
-                      </div>
-                    </div>
-                  );
-                }
-                return (
-                  <div key={field} className="space-y-1">
-                    <Label htmlFor={`${video.video_id}-${field}-opt`}>{label}</Label>
+              {Object.entries(requiredLabels).map(([field, fieldLabel]) => (
+                <div key={field} className="space-y-1">
+                  <Label htmlFor={`${video.video_id}-${field}`}>{fieldLabel}</Label>
+                  {editing ? (
                     <Input
-                      id={`${video.video_id}-${field}-opt`}
+                      id={`${video.video_id}-${field}`}
                       type="number"
                       min={0}
-                      step="1"
                       value={form[field as keyof typeof form] ?? ""}
                       onChange={(e) => setNum(field, e.target.value)}
                     />
-                  </div>
-                );
-              })}
+                  ) : (
+                    <p className="rounded-md bg-muted/60 px-3 py-2 text-sm font-medium">
+                      {formatMetricDisplay(field, form[field as keyof VideoMetrics] as number | null)}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
-        ) : null}
 
-        <div className="space-y-1">
-          <Label htmlFor={`${video.video_id}-notes`}>Notes</Label>
-          <Textarea
-            id={`${video.video_id}-notes`}
-            rows={2}
-            value={form.user_notes ?? ""}
-            onChange={(e) => setForm((prev) => ({ ...prev, user_notes: e.target.value }))}
-            placeholder="Context from TikTok Studio, promotions, etc."
-          />
-        </div>
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Optional · TikTok Studio
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+              {Object.entries(optionalLabels).map(([field, fieldLabel]) =>
+                renderOptionalField(field, fieldLabel, !editing),
+              )}
+            </div>
+          </div>
 
-        <Button size="sm" onClick={saveMetrics} disabled={saving}>
-          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          Save metrics
-        </Button>
-      </CardContent>
+          <div className="space-y-1">
+            <Label htmlFor={`${video.video_id}-notes`}>Notes</Label>
+            {editing ? (
+              <Textarea
+                id={`${video.video_id}-notes`}
+                rows={2}
+                value={form.user_notes ?? ""}
+                onChange={(e) => setForm((prev) => ({ ...prev, user_notes: e.target.value }))}
+                placeholder="Context from TikTok Studio, promotions, etc."
+              />
+            ) : (
+              <p className="min-h-[2.5rem] rounded-md bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+                {form.user_notes?.trim() || "—"}
+              </p>
+            )}
+          </div>
+
+          {editing ? (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={saveMetrics} disabled={saving}>
+                {saving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Save metrics
+              </Button>
+              {hasSavedMetrics(video.metrics) ? (
+                <Button type="button" size="sm" variant="outline" onClick={cancelEdit}>
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      ) : null}
     </Card>
   );
 }

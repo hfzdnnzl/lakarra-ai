@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Loader2, MessageSquare, X } from "lucide-react";
 import Link from "next/link";
 
-import { AnalyticsNav } from "@/components/AnalyticsNav";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,7 +61,6 @@ export default function ReviewQueuePage() {
         title="Review Queue"
         description="Content Creator outputs awaiting Content Analyst review."
       />
-      <AnalyticsNav />
       {error ? (
         <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}

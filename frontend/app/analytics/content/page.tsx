@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Loader2, Play } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp, Loader2, Play } from "lucide-react";
 
-import { AnalyticsNav } from "@/components/AnalyticsNav";
+import { useAnalyticsAccount } from "@/components/analytics/AnalyticsShell";
 import { PageHeader } from "@/components/page-header";
 import { VideoAnalyticsCard } from "@/components/VideoAnalyticsCard";
 import { Button } from "@/components/ui/button";
@@ -12,22 +12,28 @@ import { api } from "@/lib/api";
 import type { ContentAnalyticsPage } from "@/types";
 
 export default function ContentAnalyticsPage() {
+  const { configured } = useAnalyticsAccount();
   const [page, setPage] = useState<ContentAnalyticsPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState<string | null>(null);
+  const [expandAll, setExpandAll] = useState(true);
 
   const load = useCallback(async () => {
+    if (!configured) {
+      setPage(null);
+      return;
+    }
     try {
       setPage(await api.analyticsContent());
       setError(null);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, []);
+  }, [configured]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const analyzeAll = async () => {
@@ -50,13 +56,37 @@ export default function ContentAnalyticsPage() {
     }
   };
 
+  const sortedVideos = useMemo(() => {
+    if (!page) return [];
+    return [...page.videos].sort((a, b) => {
+      if (a.metrics.required_complete === b.metrics.required_complete) {
+        return a.title.localeCompare(b.title);
+      }
+      return a.metrics.required_complete ? 1 : -1;
+    });
+  }, [page]);
+
   const ready = page?.readiness.ready ?? false;
+
+  if (!configured) {
+    return (
+      <>
+        <PageHeader
+          title="Content Analytics"
+          description="Confirm TikTok Studio metrics, then run AI analysis on your videos."
+        />
+        <p className="text-muted-foreground">
+          Connect your TikTok account above to manage video metrics.
+        </p>
+      </>
+    );
+  }
 
   return (
     <>
       <PageHeader
         title="Content Analytics"
-        description="Confirm TikTok Studio metrics, then run AI analysis on your videos."
+        description="Enter TikTok Studio metrics per video, then run AI analysis."
         action={
           <Button onClick={analyzeAll} disabled={busy || !ready} size="sm">
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
@@ -64,7 +94,7 @@ export default function ContentAnalyticsPage() {
           </Button>
         }
       />
-      <AnalyticsNav />
+
       {error ? (
         <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
@@ -88,7 +118,7 @@ export default function ContentAnalyticsPage() {
               <p>
                 {ready
                   ? "All videos have required metrics. Account-level analytics and bulk analysis are enabled."
-                  : `Complete required metrics (views, likes, comments, shares, saves) for all videos before account analytics. ${page.readiness.complete_videos}/${page.readiness.total_videos} complete.`}
+                  : `Complete required metrics (views, likes, comments, shares, saves) for all videos. ${page.readiness.complete_videos}/${page.readiness.total_videos} complete.`}
               </p>
               {!ready && page.readiness.incomplete_videos.length > 0 ? (
                 <ul className="list-inside list-disc text-muted-foreground">
@@ -99,12 +129,10 @@ export default function ContentAnalyticsPage() {
                   ))}
                 </ul>
               ) : null}
-              {page.readiness.optional_recommended_for.length > 0 ? (
-                <p className="text-muted-foreground">
-                  Tip: add optional metrics for your best and worst performers — total watch
-                  time as hh:mm:ss (e.g. 1:23:45) and completion rate as a percentage.
-                </p>
-              ) : null}
+              <p className="text-muted-foreground">
+                Optional metrics (watch time as hh:mm:ss, completion rate as %) are available
+                for every video.
+              </p>
             </CardContent>
           </Card>
 
@@ -151,24 +179,48 @@ export default function ContentAnalyticsPage() {
             </div>
           ) : null}
 
-          <h2 className="mb-4 text-lg font-semibold">Videos</h2>
-          {page.videos.length === 0 ? (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Videos</h2>
+            {sortedVideos.length > 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setExpandAll((v) => !v)}
+              >
+                {expandAll ? (
+                  <>
+                    <ChevronUp className="mr-1.5 h-4 w-4" />
+                    Collapse all
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="mr-1.5 h-4 w-4" />
+                    Expand all
+                  </>
+                )}
+              </Button>
+            ) : null}
+          </div>
+
+          {sortedVideos.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No videos to track yet. Mark content as Posted in the Content library, or wait
               for TikTok video list to load when the data provider is available.
             </p>
           ) : (
-          <div className="space-y-4">
-            {page.videos.map((video) => (
-              <VideoAnalyticsCard
-                key={video.video_id}
-                video={video}
-                requiredLabels={page.required_field_labels}
-                optionalLabels={page.optional_field_labels}
-                onUpdated={load}
-              />
-            ))}
-          </div>
+            <div className="space-y-4">
+              {sortedVideos.map((video) => (
+                <VideoAnalyticsCard
+                  key={video.video_id}
+                  video={video}
+                  requiredLabels={page.required_field_labels}
+                  optionalLabels={page.optional_field_labels}
+                  onUpdated={load}
+                  expandAll={expandAll}
+                />
+              ))}
+            </div>
           )}
         </>
       )}

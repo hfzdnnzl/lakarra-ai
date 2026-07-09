@@ -252,7 +252,7 @@ class TestAnalyticsService:
         page = analytics_service.get_content_page()
         assert page.overview.live_data_error is not None
         assert len(page.videos) == 1
-        assert page.videos[0].title == "Posted wedding invite"
+        assert page.videos[0].title == "Beautiful digital invites"
 
     def test_get_historical(self, analytics_service: AnalyticsService):
         analytics_service.analyze_account()
