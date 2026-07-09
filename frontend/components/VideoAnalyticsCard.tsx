@@ -371,6 +371,75 @@ export function VideoAnalyticsCard({
             </p>
           ) : null}
 
+          {video.is_analyzed && (video.strengths?.length ?? 0) > 0 ? (
+            <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50/60 p-3">
+              <div className="font-medium text-emerald-900">What&apos;s working</div>
+              <ul className="list-inside list-disc space-y-1 text-emerald-900/90">
+                {video.strengths!.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {video.is_analyzed && (video.weaknesses?.length ?? 0) > 0 ? (
+            <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50/60 p-3">
+              <div className="font-medium text-amber-900">What to improve</div>
+              <ul className="list-inside list-disc space-y-1 text-amber-900/90">
+                {video.weaknesses!.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {video.is_analyzed && (video.priority_improvements?.length ?? 0) > 0 ? (
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="font-medium">Priority actions</div>
+              <ol className="list-inside list-decimal space-y-1 text-muted-foreground">
+                {video.priority_improvements!.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+
+          {video.is_analyzed && (video.quality_scores?.length ?? 0) > 0 ? (
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="font-medium">Content scores</div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {video.quality_scores!.map((score) => (
+                  <div
+                    key={score.label}
+                    className="rounded-md bg-muted/50 px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{score.label}</span>
+                      <span className="text-sm tabular-nums">
+                        {(score.score * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    {score.explanation ? (
+                      <p className="mt-1 text-xs text-muted-foreground">{score.explanation}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {video.is_analyzed &&
+          (video.recommendations_summary?.experiments?.length ?? 0) > 0 ? (
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="font-medium">Experiments to try</div>
+              <ul className="list-inside list-disc space-y-1 text-muted-foreground">
+                {video.recommendations_summary!.experiments.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {video.visual_review ? (
             <div className="space-y-3 rounded-md border bg-muted/30 p-3">
               <div className="font-medium">Visual review</div>

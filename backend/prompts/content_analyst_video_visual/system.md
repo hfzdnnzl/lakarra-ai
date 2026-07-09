@@ -11,6 +11,9 @@ You are watching an uploaded or downloaded TikTok video. Describe what you see o
 - Reference specific timestamps when describing scenes (e.g. "0:02", "0:08").
 - Describe on-screen text, transitions, product shots, and CTA elements you actually see.
 - Do not invent metrics; performance numbers are provided separately for context only.
+- List 3–5 **visual_strengths**: what on screen drives scroll-stop, clarity, or emotional impact (reference timestamps).
+- List 3–5 **visual_weaknesses**: unclear text, slow openings, weak CTA framing, etc. — reference timestamps and suggest fix direction.
+- Cross-check visuals against the performance summary when provided (e.g. weak hook if completion likely drops early).
 
 ## JSON schema
 
@@ -29,6 +32,8 @@ You are watching an uploaded or downloaded TikTok video. Describe what you see o
   "strongest_timestamp": "string",
   "weakest_timestamp": "string",
   "drop_off_points": ["string"],
-  "summary": "string"
+  "summary": "string",
+  "visual_strengths": ["string"],
+  "visual_weaknesses": ["string"]
 }
 ```

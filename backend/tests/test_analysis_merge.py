@@ -44,6 +44,9 @@ def _metrics_payload() -> ContentAnalysisPayload:
         ),
         comments=CommentIntelligence(),
         summary="Metrics summary only.",
+        strengths=["Strong save rate for the category"],
+        weaknesses=["Hook could be more provocative in the first second"],
+        priority_improvements=["Test a question-format hook in frame one"],
         recommendations=ContentRecommendations(
             hook_improvements=["Try stronger text hook"],
         ),
@@ -65,6 +68,8 @@ def _visual_payload() -> VisualReviewPayload:
         weakest_timestamp="0:08",
         drop_off_points=["Static middle shot"],
         summary="Visually strong opener.",
+        visual_strengths=["0:00 — Product close-up creates immediate focus"],
+        visual_weaknesses=["0:08 — Static frame may hurt retention"],
     )
 
 
@@ -98,3 +103,17 @@ class TestAnalysisMerge:
         assert "Opens with product close-up." in merged.summary
         assert "Metrics summary only." in merged.summary
         assert any("visual review" in item.lower() for item in merged.recommendations.hook_improvements)
+
+    def test_visual_merges_strengths_and_weaknesses(self):
+        merged = merge_visual_into_content_analysis(
+            _metrics_payload(),
+            _visual_payload(),
+            analysis_mode="full",
+            video_source="analytics_upload",
+            linked_content_id=None,
+        )
+        assert "Strong save rate for the category" in merged.strengths
+        assert "0:00 — Product close-up creates immediate focus" in merged.strengths
+        assert "Hook could be more provocative in the first second" in merged.weaknesses
+        assert "0:08 — Static frame may hurt retention" in merged.weaknesses
+        assert len(merged.priority_improvements) >= 1

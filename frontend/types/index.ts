@@ -391,6 +391,17 @@ export interface VideoMetrics {
   metrics_priority: string;
 }
 
+export interface ScoreSummary {
+  label: string;
+  score: number;
+  explanation: string;
+}
+
+export interface VideoRecommendationsSummary {
+  hook_improvements: string[];
+  experiments: string[];
+}
+
 export interface VisualReview {
   hook_description: string;
   scene_breakdown: string[];
@@ -401,6 +412,8 @@ export interface VisualReview {
   weakest_timestamp: string;
   drop_off_points: string[];
   summary: string;
+  visual_strengths?: string[];
+  visual_weaknesses?: string[];
 }
 
 export interface VideoCatalogItem {
@@ -421,6 +434,11 @@ export interface VideoCatalogItem {
   has_video_upload?: boolean;
   upload_filename?: string | null;
   visual_review?: VisualReview | null;
+  strengths?: string[];
+  weaknesses?: string[];
+  priority_improvements?: string[];
+  quality_scores?: ScoreSummary[];
+  recommendations_summary?: VideoRecommendationsSummary;
   metrics: VideoMetrics;
   metrics_priority: string;
 }

@@ -91,6 +91,14 @@ class MockVideoAnalysisService(VideoAnalysisService):
                     "weakest_timestamp": "0:10",
                     "drop_off_points": ["Mid-video static product shot"],
                     "summary": "Visually polished short-form clip with a strong opening frame.",
+                    "visual_strengths": [
+                        "0:00 — Immediate product close-up creates scroll-stop",
+                        "Clean on-screen typography supports brand positioning",
+                    ],
+                    "visual_weaknesses": [
+                        "0:08 — Static product shot may cause mid-video drop-off",
+                        "CTA text is small and easy to miss in the final frame",
+                    ],
                 }
             )
 

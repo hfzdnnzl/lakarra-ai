@@ -102,6 +102,7 @@ class TestAnalyticsService:
         assert resp.version == 1
         assert resp.data is not None
         assert resp.data.get("analysis_mode") == "metrics_only"
+        assert isinstance(resp.data.get("strengths"), list)
 
         repo = AnalyticsRepository(db_session)
         rows = repo.list_content_analyses(video_id="lk-001")
@@ -378,12 +379,17 @@ class TestAnalyticsAPI:
       assert resp.json()["success"] is True
 
   def test_content_page_endpoint(self, client: TestClient):
+      client.post("/api/analytics/videos/lk-001/analyze")
       resp = client.get("/api/analytics/content")
       assert resp.status_code == 200
       data = resp.json()
       assert "videos" in data
       assert "readiness" in data
       assert len(data["videos"]) == 5
+      analyzed = next(v for v in data["videos"] if v["video_id"] == "lk-001")
+      assert analyzed["is_analyzed"] is True
+      assert isinstance(analyzed.get("strengths"), list)
+      assert isinstance(analyzed.get("quality_scores"), list)
 
   def test_update_video_metrics_endpoint(self, client: TestClient):
       resp = client.put(

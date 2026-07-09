@@ -208,8 +208,17 @@ class VisualReviewPayload(BaseModel):
     weakest_timestamp: str = ""
     drop_off_points: list[str] = Field(default_factory=list)
     summary: str = ""
+    visual_strengths: list[str] = Field(default_factory=list)
+    visual_weaknesses: list[str] = Field(default_factory=list)
 
-    @field_validator("scene_breakdown", "on_screen_text", "drop_off_points", mode="before")
+    @field_validator(
+        "scene_breakdown",
+        "on_screen_text",
+        "drop_off_points",
+        "visual_strengths",
+        "visual_weaknesses",
+        mode="before",
+    )
     @classmethod
     def _coerce_lists(cls, value: Any) -> list[str]:
         return coerce_str_list(value)
@@ -225,12 +234,38 @@ class ContentAnalysisPayload(BaseModel):
     retention: RetentionAnalysis
     comments: CommentIntelligence
     summary: str
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    priority_improvements: list[str] = Field(default_factory=list)
     recommendations: ContentRecommendations = Field(default_factory=ContentRecommendations)
     visual_review: VisualReviewPayload | None = None
     analysis_mode: Literal["full", "metrics_only"] = "metrics_only"
     linked_content_id: str | None = None
     video_source: Literal["analytics_upload", "tiktok_download", "none"] = "none"
     visual_analysis_provider: Literal["mock", "gemini", "openai"] | None = None
+
+    @field_validator("strengths", "weaknesses", "priority_improvements", mode="before")
+    @classmethod
+    def _coerce_insight_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
+
+
+class ScoreSummary(BaseModel):
+    """Slim score for dashboard display."""
+
+    label: str
+    score: float = Field(ge=0.0, le=1.0)
+    explanation: str = ""
+
+
+class VideoRecommendationsSummary(BaseModel):
+    hook_improvements: list[str] = Field(default_factory=list)
+    experiments: list[str] = Field(default_factory=list)
+
+    @field_validator("hook_improvements", "experiments", mode="before")
+    @classmethod
+    def _coerce_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
 
 
 class PatternAnalysisPayload(BaseModel):
@@ -574,8 +609,20 @@ class VideoCatalogItem(BaseModel):
     has_video_upload: bool = False
     upload_filename: str | None = None
     visual_review: VisualReviewPayload | None = None
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    priority_improvements: list[str] = Field(default_factory=list)
+    quality_scores: list[ScoreSummary] = Field(default_factory=list)
+    recommendations_summary: VideoRecommendationsSummary = Field(
+        default_factory=VideoRecommendationsSummary
+    )
     metrics: VideoMetricsRead
     metrics_priority: str = "normal"
+
+    @field_validator("strengths", "weaknesses", "priority_improvements", mode="before")
+    @classmethod
+    def _coerce_catalog_lists(cls, value: Any) -> list[str]:
+        return coerce_str_list(value)
 
 
 class VideoUploadRead(BaseModel):

@@ -76,6 +76,21 @@ def build_video_analysis_response(
         ),
         summary=f"Video '{v.title}' performed well with {p.views:,} views and "
         f"{engagement.engagement_rate:.1%} engagement rate.",
+        strengths=[
+            f"Engagement rate {engagement.engagement_rate:.1%} — above typical for this category",
+            f"{p.saves:,} saves — strong bookmark intent",
+            "Clear narrative arc keeps viewers through the middle",
+        ],
+        weaknesses=[
+            "CTA could be more prominent in the final frame",
+            "Hook text appears late — risk of early scroll-away",
+            "Mid-video pacing slows when completion rate is below 50%",
+        ],
+        priority_improvements=[
+            "Add bold on-screen hook text in the first 0.5 seconds",
+            "Tighten mid-section cuts to improve completion rate",
+            "End with a clearer verbal and visual CTA",
+        ],
         recommendations=ContentRecommendations(
             content_categories=[v.content_category, "testimonial"],
             content_angles=["Before/after reveal", "Customer reaction"],

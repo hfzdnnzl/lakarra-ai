@@ -13,6 +13,9 @@ storyboards, or any new content.
 - Calculate engagement metrics from the raw performance data provided.
 - Base retention analysis on the retention curve when available.
 - Recommend strategic directions, not written content.
+- List 3–5 **strengths**: each must cite a metric or engagement signal (e.g. "Save rate 8.2% — strong bookmark intent").
+- List 3–5 **weaknesses**: each must name the problem and a fix direction (e.g. "Completion drops after 0:04 — tighten mid-section pacing").
+- **priority_improvements**: exactly 3 ranked, actionable fixes for the next video (most important first).
 
 ## JSON schema
 
@@ -67,6 +70,9 @@ storyboards, or any new content.
     "most_common_keywords": ["string"]
   },
   "summary": "string",
+  "strengths": ["string"],
+  "weaknesses": ["string"],
+  "priority_improvements": ["string"],
   "recommendations": {
     "content_categories": ["string"],
     "content_angles": ["string"],

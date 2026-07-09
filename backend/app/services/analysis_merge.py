@@ -22,6 +22,10 @@ def _dedupe_strings(items: list[str]) -> list[str]:
     return out
 
 
+def _cap_list(items: list[str], limit: int) -> list[str]:
+    return _dedupe_strings(items)[:limit]
+
+
 def merge_visual_into_content_analysis(
     metrics_payload: ContentAnalysisPayload,
     visual: VisualReviewPayload | None,
@@ -41,6 +45,7 @@ def merge_visual_into_content_analysis(
     payload.visual_analysis_provider = visual_analysis_provider  # type: ignore[assignment]
 
     if visual is None:
+        payload.priority_improvements = _cap_list(payload.priority_improvements, 5)
         return payload
 
     scores = payload.quality_scores
@@ -68,6 +73,9 @@ def merge_visual_into_content_analysis(
     parts = [part for part in (hook_line, visual_summary, metrics_summary) if part]
     payload.summary = " ".join(parts)
 
+    payload.strengths = _dedupe_strings(payload.strengths + visual.visual_strengths)
+    payload.weaknesses = _dedupe_strings(payload.weaknesses + visual.visual_weaknesses)
+
     rec = payload.recommendations
     visual_hooks = []
     if visual.hook_description.strip():
@@ -84,4 +92,13 @@ def merge_visual_into_content_analysis(
         experiments=rec.experiments,
         strategy_gaps=rec.strategy_gaps,
     )
+
+    priority_sources = (
+        list(payload.priority_improvements)
+        + visual.visual_weaknesses
+        + payload.recommendations.hook_improvements
+        + payload.retention.drop_off_points
+    )
+    payload.priority_improvements = _cap_list(priority_sources, 5)
+
     return payload

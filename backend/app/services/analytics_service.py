@@ -31,10 +31,12 @@ from ..models.analytics import (
     PerformanceMetrics,
     ReviewDecision,
     ReviewQueueItem,
+    ScoreSummary,
     VideoCatalogItem,
     VideoInfo,
     VideoMetricsData,
     VideoMetricsRead,
+    VideoRecommendationsSummary,
     VideoUploadRead,
     VisualReviewPayload,
     normalize_tiktok_handle,
@@ -69,6 +71,45 @@ logger = logging.getLogger("lakarra.analytics_service")
 def _safe_filename(name: str) -> str:
     safe = Path(name).name.strip()
     return safe if safe and safe not in {".", ".."} else "upload.mp4"
+
+
+def _score_summaries_from_payload(payload: dict) -> list[ScoreSummary]:
+    scores_raw = payload.get("quality_scores")
+    if not isinstance(scores_raw, dict):
+        return []
+    labels = {
+        "hook_score": "Hook",
+        "retention_score": "Retention",
+        "pacing_score": "Pacing",
+        "storytelling_score": "Storytelling",
+        "overall_content_health": "Overall",
+    }
+    summaries: list[ScoreSummary] = []
+    for key, label in labels.items():
+        entry = scores_raw.get(key)
+        if not isinstance(entry, dict):
+            continue
+        score = entry.get("score")
+        if score is None:
+            continue
+        summaries.append(
+            ScoreSummary(
+                label=label,
+                score=float(score),
+                explanation=str(entry.get("explanation") or ""),
+            )
+        )
+    return summaries
+
+
+def _recommendations_summary_from_payload(payload: dict) -> VideoRecommendationsSummary:
+    rec = payload.get("recommendations")
+    if not isinstance(rec, dict):
+        return VideoRecommendationsSummary()
+    return VideoRecommendationsSummary(
+        hook_improvements=rec.get("hook_improvements") or [],
+        experiments=rec.get("experiments") or [],
+    )
 
 
 class AnalyticsService:
@@ -454,6 +495,11 @@ class AnalyticsService:
                     has_video_upload=upload is not None,
                     upload_filename=upload.original_filename if upload else None,
                     visual_review=visual_review,
+                    strengths=payload.get("strengths") or [],
+                    weaknesses=payload.get("weaknesses") or [],
+                    priority_improvements=payload.get("priority_improvements") or [],
+                    quality_scores=_score_summaries_from_payload(payload),
+                    recommendations_summary=_recommendations_summary_from_payload(payload),
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
                 )
