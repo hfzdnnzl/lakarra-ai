@@ -156,6 +156,104 @@ class TestAnalyticsService:
         assert overview.live_data_error is not None
         assert overview.total_videos == 0
 
+    def test_get_content_page_shows_videos_with_live_data_error(
+        self, analytics_service: AnalyticsService, monkeypatch: pytest.MonkeyPatch
+    ):
+        from app.models.analytics import PerformanceMetrics, VideoInfo
+        from app.providers import TikTokAccountData, TikTokVideoData
+
+        sample_video = TikTokVideoData(
+            video=VideoInfo(
+                video_id="lk-stale",
+                url="https://tiktok.com/@lakarra/video/lk-stale",
+                title="Stale video",
+                caption="Stale",
+                hashtags=[],
+                publish_date="2026-01-01",
+                publish_time="10:00",
+                duration=20,
+                thumbnail="",
+                content_category="general",
+            ),
+            performance=PerformanceMetrics(
+                views=100,
+                reach=100,
+                watch_time=50.0,
+                average_watch_duration=20.0,
+                completion_rate=0.0,
+                retention_curve=[],
+                likes=10,
+                comments=2,
+                shares=1,
+                saves=3,
+                profile_visits=0,
+                followers_gained=0,
+                link_clicks=None,
+            ),
+            comments=[],
+        )
+        sample_account = TikTokAccountData(
+            handle="lakarra", follower_count=1000, videos=[sample_video]
+        )
+
+        monkeypatch.setattr(
+            analytics_service,
+            "_fetch_account",
+            lambda _handle: (
+                sample_account,
+                "Could not refresh live TikTok data: rate limited.",
+            ),
+        )
+
+        page = analytics_service.get_content_page()
+        assert page.overview.live_data_error is not None
+        assert len(page.videos) == 1
+        assert page.videos[0].video_id == "lk-stale"
+        assert page.readiness.total_videos == 1
+
+    def test_get_content_page_falls_back_to_posted_cms_content(
+        self,
+        analytics_service: AnalyticsService,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from uuid import uuid4
+
+        from app.models.db import Content
+
+        content = Content(
+            id=uuid4().hex,
+            title="Posted wedding invite",
+            category="aesthetic",
+            business_goal="awareness",
+            target_audience="couples",
+            product="digital invites",
+            hook="POV your invite arrives",
+            duration=25,
+            caption="Beautiful digital invites",
+            hashtags=["wedding"],
+            cta="Link in bio",
+            posting_time="18:00",
+            confidence_score=0.9,
+            status="posted",
+        )
+        db_session.add(content)
+        db_session.commit()
+
+        monkeypatch.setattr(
+            analytics_service,
+            "_fetch_account",
+            lambda handle: (
+                analytics_service._account_from_posted_content(handle),
+                "TikTok data request failed (HTTP 531).",
+            ),
+        )
+
+        page = analytics_service.get_content_page()
+        assert page.overview.live_data_error is not None
+        assert len(page.videos) == 1
+        assert page.videos[0].title == "Posted wedding invite"
+
     def test_get_historical(self, analytics_service: AnalyticsService):
         analytics_service.analyze_account()
         historical = analytics_service.get_historical()

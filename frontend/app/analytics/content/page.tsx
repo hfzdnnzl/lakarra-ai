@@ -101,8 +101,8 @@ export default function ContentAnalyticsPage() {
               ) : null}
               {page.readiness.optional_recommended_for.length > 0 ? (
                 <p className="text-muted-foreground">
-                  Tip: add optional watch-time and completion-rate metrics for your best and
-                  worst performers to improve analysis quality.
+                  Tip: add optional metrics for your best and worst performers — total watch
+                  time as hh:mm:ss (e.g. 1:23:45) and completion rate as a percentage.
                 </p>
               ) : null}
             </CardContent>
@@ -152,6 +152,12 @@ export default function ContentAnalyticsPage() {
           ) : null}
 
           <h2 className="mb-4 text-lg font-semibold">Videos</h2>
+          {page.videos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No videos to track yet. Mark content as Posted in the Content library, or wait
+              for TikTok video list to load when the data provider is available.
+            </p>
+          ) : (
           <div className="space-y-4">
             {page.videos.map((video) => (
               <VideoAnalyticsCard
@@ -163,6 +169,7 @@ export default function ContentAnalyticsPage() {
               />
             ))}
           </div>
+          )}
         </>
       )}
     </>

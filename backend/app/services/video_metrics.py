@@ -14,6 +14,7 @@ REQUIRED_METRIC_FIELDS: tuple[str, ...] = (
 )
 
 # Optional — recommended for best/worst performers (TikTok Studio data).
+# watch_time is stored as total seconds; completion_rate as 0–1 ratio.
 OPTIONAL_METRIC_FIELDS: tuple[str, ...] = (
     "reach",
     "watch_time",
@@ -31,9 +32,9 @@ METRIC_FIELD_LABELS: dict[str, str] = {
     "shares": "Shares",
     "saves": "Saves",
     "reach": "Reach",
-    "watch_time": "Total watch time (minutes)",
+    "watch_time": "Total watch time (hh:mm:ss)",
     "average_watch_duration": "Avg watch duration (seconds)",
-    "completion_rate": "Completion rate (0–1)",
+    "completion_rate": "Completion rate (%)",
     "profile_visits": "Profile visits",
     "followers_gained": "Followers gained",
     "link_clicks": "Link clicks",

@@ -7,7 +7,10 @@ Set TIKTOK_PROVIDER=mock in tests or when offline.
 from __future__ import annotations
 
 import logging
+import re
+import threading
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import httpx
@@ -25,17 +28,54 @@ from ..models.analytics import (
 
 logger = logging.getLogger("lakarra.tiktok_live")
 
+_REQUEST_LOCK = threading.Lock()
 _LAST_REQUEST_AT = 0.0
+_ACCOUNT_CACHE: dict[str, tuple[float, TikTokAccountData]] = {}
+
+_RATE_LIMIT_PATTERN = re.compile(r"limit|request/second|too many", re.IGNORECASE)
 
 
-def _rate_limit() -> None:
-    """tikwm free tier allows ~1 request/second."""
+@dataclass(frozen=True)
+class AccountFetchResult:
+    """Result of a TikTok account fetch, optionally served from cache."""
 
-    global _LAST_REQUEST_AT  # noqa: PLW0603
-    elapsed = time.monotonic() - _LAST_REQUEST_AT
-    if elapsed < 1.1:
-        time.sleep(1.1 - elapsed)
-    _LAST_REQUEST_AT = time.monotonic()
+    account: TikTokAccountData
+    live_data_error: str | None = None
+
+
+def clear_account_cache(handle: str | None = None) -> None:
+    """Clear cached account data (all handles, or one handle). Used in tests."""
+
+    if handle is None:
+        _ACCOUNT_CACHE.clear()
+        return
+    normalized = normalize_tiktok_handle(handle)
+    _ACCOUNT_CACHE.pop(normalized, None)
+
+
+def _is_rate_limit_error(message: str) -> bool:
+    return bool(_RATE_LIMIT_PATTERN.search(message))
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    """Transient tikwm / gateway errors worth retrying."""
+
+    return status_code in {429, 502, 503, 520, 521, 522, 523, 524, 531}
+
+
+def _get_cached_account(handle: str, *, allow_stale: bool = False) -> TikTokAccountData | None:
+    entry = _ACCOUNT_CACHE.get(handle)
+    if entry is None:
+        return None
+    fetched_at, account = entry
+    ttl = get_settings().tiktok_cache_ttl_seconds
+    if allow_stale or (time.monotonic() - fetched_at) < ttl:
+        return account
+    return None
+
+
+def _set_cached_account(handle: str, account: TikTokAccountData) -> None:
+    _ACCOUNT_CACHE[handle] = (time.monotonic(), account)
 
 
 def _client() -> httpx.Client:
@@ -47,23 +87,58 @@ def _client() -> httpx.Client:
 
 
 def _get_json(client: httpx.Client, path: str, *, params: dict) -> dict:
-    _rate_limit()
-    base = get_settings().tiktok_api_base_url.rstrip("/")
-    try:
-        response = client.get(f"{base}{path}", params=params)
-    except httpx.HTTPError as exc:
-        raise TikTokFetchError(f"TikTok data request failed: {exc}") from exc
-    if response.status_code != 200:
-        raise TikTokFetchError(
-            f"TikTok data request failed (HTTP {response.status_code})."
-        )
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise TikTokFetchError("TikTok data provider returned invalid JSON.") from exc
-    if payload.get("code") != 0:
-        raise TikTokFetchError(payload.get("msg") or "TikTok data request failed.")
-    return payload["data"]
+    settings = get_settings()
+    last_error: TikTokFetchError | None = None
+
+    for attempt in range(settings.tiktok_rate_limit_retries):
+        with _REQUEST_LOCK:
+            global _LAST_REQUEST_AT  # noqa: PLW0603
+            elapsed = time.monotonic() - _LAST_REQUEST_AT
+            if elapsed < 1.1:
+                time.sleep(1.1 - elapsed)
+
+            base = settings.tiktok_api_base_url.rstrip("/")
+            try:
+                response = client.get(f"{base}{path}", params=params)
+            except httpx.HTTPError as exc:
+                last_error = TikTokFetchError(f"TikTok data request failed: {exc}")
+                _LAST_REQUEST_AT = time.monotonic()
+            else:
+                if response.status_code != 200:
+                    message = f"TikTok data request failed (HTTP {response.status_code})."
+                    last_error = TikTokFetchError(message)
+                    _LAST_REQUEST_AT = time.monotonic()
+                    if not _is_retryable_status(response.status_code):
+                        raise last_error
+                else:
+                    try:
+                        payload = response.json()
+                    except ValueError as exc:
+                        raise TikTokFetchError(
+                            "TikTok data provider returned invalid JSON."
+                        ) from exc
+                    if payload.get("code") != 0:
+                        message = payload.get("msg") or "TikTok data request failed."
+                        last_error = TikTokFetchError(message)
+                        _LAST_REQUEST_AT = time.monotonic()
+                        if not _is_rate_limit_error(message):
+                            raise last_error
+                    else:
+                        _LAST_REQUEST_AT = time.monotonic()
+                        return payload["data"]
+
+        if attempt < settings.tiktok_rate_limit_retries - 1 and last_error is not None:
+            logger.info(
+                "tiktok_live.rate_limit_retry attempt=%s path=%s",
+                attempt + 1,
+                path,
+            )
+            time.sleep(settings.tiktok_rate_limit_retry_seconds)
+            continue
+        if last_error is not None:
+            raise last_error
+
+    raise TikTokFetchError("TikTok data request failed.")
 
 
 def _caption_from_video(raw: dict) -> str:
@@ -158,7 +233,8 @@ class LiveTikTokProvider(TikTokProvider):
             cursor = data.get("cursor") or 0
         return collected[:max_videos]
 
-    def get_account(self) -> TikTokAccountData:
+    def _fetch_account_fresh(self) -> tuple[TikTokAccountData, str | None]:
+        posts_error: str | None = None
         with _client() as client:
             info = _get_json(
                 client, "/api/user/info", params={"unique_id": self._handle}
@@ -169,14 +245,75 @@ class LiveTikTokProvider(TikTokProvider):
                 raise TikTokFetchError(
                     f"@{self._handle} is a private account and cannot be analyzed."
                 )
-            raw_videos = self._fetch_videos(client)
+            try:
+                raw_videos = self._fetch_videos(client)
+            except TikTokFetchError as exc:
+                logger.warning(
+                    "tiktok_live.posts_fetch_failed handle=%s error=%s",
+                    self._handle,
+                    exc.message,
+                )
+                posts_error = exc.message
+                raw_videos = []
 
         videos = [_video_from_raw(self._handle, raw) for raw in raw_videos]
-        return TikTokAccountData(
+        account = TikTokAccountData(
             handle=self._handle,
             follower_count=int(stats.get("followerCount") or 0),
             videos=videos,
         )
+        return account, posts_error
+
+    def fetch_account(self) -> AccountFetchResult:
+        """Fetch account data, using cache and stale fallback when live fetch fails."""
+
+        cached = _get_cached_account(self._handle)
+        if cached is not None:
+            return AccountFetchResult(account=cached)
+
+        live_data_error: str | None = None
+        try:
+            account, posts_error = self._fetch_account_fresh()
+        except TikTokFetchError as exc:
+            stale = _get_cached_account(self._handle, allow_stale=True)
+            if stale is not None:
+                logger.warning(
+                    "tiktok_live.using_stale_cache handle=%s error=%s",
+                    self._handle,
+                    exc.message,
+                )
+                return AccountFetchResult(
+                    account=stale,
+                    live_data_error=(
+                        f"Could not refresh live TikTok data: {exc.message}. "
+                        "Showing cached data."
+                    ),
+                )
+            raise
+
+        if posts_error and not account.videos:
+            stale = _get_cached_account(self._handle, allow_stale=True)
+            if stale is not None and stale.videos:
+                account = TikTokAccountData(
+                    handle=account.handle,
+                    follower_count=account.follower_count,
+                    videos=stale.videos,
+                )
+                live_data_error = (
+                    f"Could not refresh video list: {posts_error}. Showing cached videos."
+                )
+            else:
+                live_data_error = f"Could not load video list: {posts_error}."
+        elif posts_error:
+            live_data_error = f"Some live data may be stale: {posts_error}"
+
+        if account.videos:
+            _set_cached_account(self._handle, account)
+
+        return AccountFetchResult(account=account, live_data_error=live_data_error)
+
+    def get_account(self) -> TikTokAccountData:
+        return self.fetch_account().account
 
     def get_video(self, video_id: str) -> TikTokVideoData | None:
         account = self.get_account()

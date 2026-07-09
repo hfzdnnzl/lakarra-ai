@@ -25,14 +25,22 @@ from ..models.analytics import (
     ContentAnalyticsPage,
     HistoricalAnalytics,
     MetricsReadiness,
+    PerformanceMetrics,
     ReviewDecision,
     ReviewQueueItem,
     VideoCatalogItem,
+    VideoInfo,
     VideoMetricsData,
     VideoMetricsRead,
     normalize_tiktok_handle,
 )
-from ..providers import TikTokVideoData, build_internal_content_provider, build_tiktok_provider
+from ..providers import (
+    TikTokAccountData,
+    TikTokVideoData,
+    build_internal_content_provider,
+    build_tiktok_provider,
+)
+from ..providers.tiktok_live import LiveTikTokProvider
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
 from .video_metrics import (
@@ -111,6 +119,310 @@ class AnalyticsService:
         self._analyst.set_tiktok_provider(build_tiktok_provider(handle))
         return handle
 
+    def _fetch_account(
+        self, handle: str
+    ) -> tuple[TikTokAccountData | None, str | None]:
+        """Fetch TikTok account data; returns (account, optional live_data_error)."""
+
+        account: TikTokAccountData | None = None
+        live_data_error: str | None = None
+        provider = build_tiktok_provider(handle)
+        if isinstance(provider, LiveTikTokProvider):
+            try:
+                result = provider.fetch_account()
+                account = result.account
+                live_data_error = result.live_data_error
+            except TikTokFetchError as exc:
+                logger.warning("_fetch_account.tiktok_fetch_failed: %s", exc.message)
+                live_data_error = exc.message
+        else:
+            try:
+                account = provider.get_account()
+            except TikTokFetchError as exc:
+                logger.warning("_fetch_account.tiktok_fetch_failed: %s", exc.message)
+                live_data_error = exc.message
+
+        if account is None or not account.videos:
+            fallback = self._account_from_stored_metrics(
+                handle
+            ) or self._account_from_posted_content(handle)
+            if fallback is not None:
+                if account is None:
+                    account = fallback
+                    live_data_error = (
+                        live_data_error
+                        or "Live TikTok video list unavailable; showing saved content."
+                    )
+                else:
+                    account = TikTokAccountData(
+                        handle=account.handle,
+                        follower_count=account.follower_count,
+                        videos=fallback.videos,
+                    )
+                    live_data_error = (
+                        live_data_error
+                        or "Could not load videos from TikTok; showing CMS posted content."
+                    )
+
+        return account, live_data_error
+
+    def _performance_from_metrics_row(self, row) -> PerformanceMetrics:
+        data = metrics_from_row(row)
+        return PerformanceMetrics(
+            views=int(data.get("views") or 0),
+            reach=int(data.get("reach") or data.get("views") or 0),
+            watch_time=float(data.get("watch_time") or 0),
+            average_watch_duration=float(data.get("average_watch_duration") or 0),
+            completion_rate=float(data.get("completion_rate") or 0),
+            likes=int(data.get("likes") or 0),
+            comments=int(data.get("comments") or 0),
+            shares=int(data.get("shares") or 0),
+            saves=int(data.get("saves") or 0),
+            profile_visits=int(data.get("profile_visits") or 0),
+            followers_gained=int(data.get("followers_gained") or 0),
+            link_clicks=data.get("link_clicks"),
+        )
+
+    def _account_from_stored_metrics(self, handle: str) -> TikTokAccountData | None:
+        rows = self.repo.list_video_metrics(tiktok_handle=handle)
+        if not rows:
+            return None
+
+        analyses = self.repo.get_latest_analyses_map()
+        videos: list[TikTokVideoData] = []
+        for row in rows:
+            payload = analyses[row.video_id].payload if row.video_id in analyses else {}
+            video_meta = payload.get("video", {})
+            title = video_meta.get("title") or f"Video {row.video_id}"
+            videos.append(
+                TikTokVideoData(
+                    video=VideoInfo(
+                        video_id=row.video_id,
+                        url=f"https://www.tiktok.com/@{handle}/video/{row.video_id}",
+                        title=title,
+                        caption=video_meta.get("caption", ""),
+                        content_category=video_meta.get("content_category", "general"),
+                    ),
+                    performance=self._performance_from_metrics_row(row),
+                    comments=[],
+                )
+            )
+        return TikTokAccountData(handle=handle, follower_count=0, videos=videos)
+
+    def _account_from_posted_content(self, handle: str) -> TikTokAccountData | None:
+        items = build_internal_content_provider(self.session).list_posted_content()
+        if not items:
+            return None
+
+        metrics_map = {
+            m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)
+        }
+        videos: list[TikTokVideoData] = []
+        for content in items:
+            row = metrics_map.get(content.id)
+            performance = (
+                self._performance_from_metrics_row(row)
+                if row is not None
+                else PerformanceMetrics()
+            )
+            videos.append(
+                TikTokVideoData(
+                    video=VideoInfo(
+                        video_id=content.id,
+                        title=content.title,
+                        caption=content.caption,
+                        hashtags=list(content.hashtags or []),
+                        duration=content.duration,
+                        content_category=content.category,
+                    ),
+                    performance=performance,
+                    comments=[],
+                )
+            )
+        return TikTokAccountData(handle=handle, follower_count=0, videos=videos)
+
+    def _video_known(self, handle: str, video_id: str) -> bool:
+        if self.repo.get_video_metrics(video_id) is not None:
+            return True
+        if build_internal_content_provider(self.session).get_content(video_id) is not None:
+            return True
+        provider = build_tiktok_provider(handle)
+        try:
+            return provider.get_video(video_id) is not None
+        except TikTokFetchError:
+            return False
+
+    def _build_overview_from_account(
+        self,
+        handle: str,
+        account: TikTokAccountData,
+        *,
+        live_data_error: str | None = None,
+    ) -> AccountOverview:
+        videos = account.videos
+        if not videos:
+            return AccountOverview(
+                tiktok_handle=handle,
+                account_configured=True,
+                live_data_error=live_data_error,
+            )
+
+        total_views = sum(v.performance.views for v in videos)
+        engagements = [
+            (
+                v.performance.likes
+                + v.performance.comments
+                + v.performance.shares
+                + v.performance.saves
+            )
+            / max(v.performance.views, 1)
+            for v in videos
+        ]
+        avg_engagement = sum(engagements) / len(engagements)
+
+        sorted_by_views = sorted(videos, key=lambda v: v.performance.views, reverse=True)
+        recent = [
+            {
+                "video_id": v.video.video_id,
+                "title": v.video.title,
+                "views": v.performance.views,
+                "category": v.video.content_category,
+                "publish_date": v.video.publish_date,
+            }
+            for v in videos[-5:]
+        ]
+        best = [
+            {
+                "video_id": v.video.video_id,
+                "title": v.video.title,
+                "views": v.performance.views,
+                "engagement_rate": round(
+                    (v.performance.likes + v.performance.comments) / max(v.performance.views, 1),
+                    4,
+                ),
+            }
+            for v in sorted_by_views[:3]
+        ]
+        worst = [
+            {
+                "video_id": v.video.video_id,
+                "title": v.video.title,
+                "views": v.performance.views,
+            }
+            for v in sorted_by_views[-3:]
+        ]
+
+        heatmap: dict[str, int] = {}
+        for v in videos:
+            day = v.video.publish_date[:10] if v.video.publish_date else "unknown"
+            hour = v.video.publish_time[:2] if v.video.publish_time else "00"
+            key = f"{day}|{hour}"
+            heatmap[key] = heatmap.get(key, 0) + v.performance.views
+
+        trends = [
+            {
+                "video_id": v.video.video_id,
+                "views": v.performance.views,
+                "publish_date": v.video.publish_date,
+            }
+            for v in videos
+        ]
+
+        snapshots = self.repo.list_metrics_snapshots(limit=10)
+        health_scores = [s for s in snapshots if s.metric == "account_health_score"]
+        health = health_scores[0].value if health_scores else round(avg_engagement * 10, 2)
+
+        return AccountOverview(
+            tiktok_handle=handle,
+            account_configured=True,
+            live_data_error=live_data_error,
+            account_health_score=min(health, 1.0) if health <= 1 else health / 10,
+            total_videos=len(videos),
+            total_views=total_views,
+            avg_engagement_rate=round(avg_engagement, 4),
+            recent_videos=recent,
+            best_performers=best,
+            worst_performers=worst,
+            posting_heatmap=heatmap,
+            performance_trends=trends,
+            growth_trends=[{"followers": account.follower_count, "period": "current"}],
+        )
+
+    def _compute_metrics_readiness(
+        self, handle: str, account: TikTokAccountData
+    ) -> MetricsReadiness:
+        metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
+        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
+        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
+
+        incomplete: list[dict] = []
+        complete = 0
+        optional_recommended: list[str] = []
+        for video in account.videos:
+            vid = video.video.video_id
+            row = metrics_map.get(vid)
+            data = metrics_from_row(row)
+            if metrics_complete(data):
+                complete += 1
+            else:
+                incomplete.append(
+                    {
+                        "video_id": vid,
+                        "title": video.video.title,
+                        "missing_required": missing_required(data),
+                    }
+                )
+            if vid in priority_ids:
+                optional_missing = [
+                    f for f in OPTIONAL_METRIC_FIELDS if data.get(f) is None
+                ]
+                if optional_missing:
+                    optional_recommended.append(vid)
+
+        return MetricsReadiness(
+            ready=complete == len(account.videos) and len(account.videos) > 0,
+            total_videos=len(account.videos),
+            complete_videos=complete,
+            incomplete_videos=incomplete,
+            required_fields=list(REQUIRED_METRIC_FIELDS),
+            optional_fields=list(OPTIONAL_METRIC_FIELDS),
+            optional_recommended_for=optional_recommended,
+        )
+
+    def _build_video_catalog(
+        self, handle: str, account: TikTokAccountData
+    ) -> list[VideoCatalogItem]:
+        analyses = self.repo.get_latest_analyses_map()
+        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
+        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
+        metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
+
+        catalog: list[VideoCatalogItem] = []
+        for video in account.videos:
+            vid = video.video.video_id
+            priority = "high" if vid in priority_ids else "normal"
+            row = metrics_map.get(vid)
+            latest = analyses.get(vid)
+            payload = latest.payload if latest else {}
+            catalog.append(
+                VideoCatalogItem(
+                    video_id=vid,
+                    title=video.video.title,
+                    url=video.video.url,
+                    caption=video.video.caption,
+                    publish_date=video.video.publish_date,
+                    duration=video.video.duration,
+                    thumbnail=video.video.thumbnail,
+                    is_analyzed=latest is not None,
+                    analysis_version=latest.version if latest else None,
+                    analysis_id=latest.id if latest else None,
+                    analysis_summary=payload.get("summary"),
+                    metrics=self._metrics_read(vid, row, priority=priority),
+                    metrics_priority=priority,
+                )
+            )
+        return catalog
+
     # --- Video metrics & catalog -------------------------------------------
     def _sync_public_metrics(self, handle: str, video: TikTokVideoData) -> None:
         existing = self.repo.get_video_metrics(video.video.video_id)
@@ -152,52 +464,13 @@ class AnalyticsService:
 
     def get_metrics_readiness(self) -> MetricsReadiness:
         handle = self._require_handle()
-        try:
-            account = build_tiktok_provider(handle).get_account()
-        except TikTokFetchError as exc:
-            logger.warning("metrics_readiness.tiktok_fetch_failed: %s", exc.message)
+        account, _live_data_error = self._fetch_account(handle)
+        if account is None:
             return MetricsReadiness(ready=False, total_videos=0, complete_videos=0)
         for video in account.videos:
             self._sync_public_metrics(handle, video)
         self.session.commit()
-
-        metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
-        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
-        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
-
-        incomplete: list[dict] = []
-        complete = 0
-        optional_recommended: list[str] = []
-        for video in account.videos:
-            vid = video.video.video_id
-            row = metrics_map.get(vid)
-            data = metrics_from_row(row)
-            if metrics_complete(data):
-                complete += 1
-            else:
-                incomplete.append(
-                    {
-                        "video_id": vid,
-                        "title": video.video.title,
-                        "missing_required": missing_required(data),
-                    }
-                )
-            if vid in priority_ids:
-                optional_missing = [
-                    f for f in OPTIONAL_METRIC_FIELDS if data.get(f) is None
-                ]
-                if optional_missing:
-                    optional_recommended.append(vid)
-
-        return MetricsReadiness(
-            ready=complete == len(account.videos) and len(account.videos) > 0,
-            total_videos=len(account.videos),
-            complete_videos=complete,
-            incomplete_videos=incomplete,
-            required_fields=list(REQUIRED_METRIC_FIELDS),
-            optional_fields=list(OPTIONAL_METRIC_FIELDS),
-            optional_recommended_for=optional_recommended,
-        )
+        return self._compute_metrics_readiness(handle, account)
 
     def _ensure_metrics_ready(self) -> None:
         readiness = self.get_metrics_readiness()
@@ -213,84 +486,59 @@ class AnalyticsService:
             )
 
     def get_content_page(self) -> ContentAnalyticsPage:
-        overview = self.get_overview()
-        readiness = self.get_metrics_readiness()
-        if overview.live_data_error:
+        settings = self.get_account_settings()
+        labels = {
+            "required_field_labels": {
+                k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
+            },
+            "optional_field_labels": {
+                k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
+            },
+        }
+        if not settings.configured or not settings.tiktok_handle:
+            overview = AccountOverview(tiktok_handle=None, account_configured=False)
             return ContentAnalyticsPage(
                 overview=overview,
-                readiness=readiness,
+                readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
                 videos=[],
-                required_field_labels={
-                    k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
-                },
-                optional_field_labels={
-                    k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
-                },
+                **labels,
             )
 
-        handle = self._require_handle()
-        try:
-            account = build_tiktok_provider(handle).get_account()
-        except TikTokFetchError as exc:
-            logger.warning("get_content_page.tiktok_fetch_failed: %s", exc.message)
-            overview = overview.model_copy(update={"live_data_error": exc.message})
+        handle = settings.tiktok_handle
+        account, live_data_error = self._fetch_account(handle)
+        if account is None:
+            overview = AccountOverview(
+                tiktok_handle=handle,
+                account_configured=True,
+                live_data_error=live_data_error,
+            )
             return ContentAnalyticsPage(
                 overview=overview,
-                readiness=readiness,
+                readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
                 videos=[],
-                required_field_labels={
-                    k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
-                },
-                optional_field_labels={
-                    k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
-                },
+                **labels,
             )
-        analyses = self.repo.get_latest_analyses_map()
-        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
-        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
-        metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
 
-        catalog: list[VideoCatalogItem] = []
         for video in account.videos:
-            vid = video.video.video_id
-            priority = "high" if vid in priority_ids else "normal"
-            row = metrics_map.get(vid)
-            latest = analyses.get(vid)
-            payload = latest.payload if latest else {}
-            catalog.append(
-                VideoCatalogItem(
-                    video_id=vid,
-                    title=video.video.title,
-                    url=video.video.url,
-                    caption=video.video.caption,
-                    publish_date=video.video.publish_date,
-                    duration=video.video.duration,
-                    thumbnail=video.video.thumbnail,
-                    is_analyzed=latest is not None,
-                    analysis_version=latest.version if latest else None,
-                    analysis_id=latest.id if latest else None,
-                    analysis_summary=payload.get("summary"),
-                    metrics=self._metrics_read(vid, row, priority=priority),
-                    metrics_priority=priority,
-                )
-            )
+            self._sync_public_metrics(handle, video)
+        self.session.commit()
+
+        overview = self._build_overview_from_account(
+            handle, account, live_data_error=live_data_error
+        )
+        readiness = self._compute_metrics_readiness(handle, account)
+        catalog = self._build_video_catalog(handle, account)
 
         return ContentAnalyticsPage(
             overview=overview,
             readiness=readiness,
             videos=catalog,
-            required_field_labels={
-                k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
-            },
-            optional_field_labels={
-                k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
-            },
+            **labels,
         )
 
     def update_video_metrics(self, video_id: str, body: VideoMetricsData) -> VideoMetricsRead:
         handle = self._require_handle()
-        provider = build_tiktok_provider(handle)
-        if provider.get_video(video_id) is None:
+        if not self._video_known(handle, video_id):
             raise NotFoundError(f"Video '{video_id}' not found on connected account.")
 
         row = self.repo.upsert_video_metrics(
@@ -299,10 +547,16 @@ class AnalyticsService:
             data=body.model_dump(exclude_unset=True),
         )
         self.session.commit()
-        account = provider.get_account()
-        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
-        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
-        priority = "high" if video_id in priority_ids else "normal"
+        account, _ = self._fetch_account(handle)
+        priority = "normal"
+        if account is not None and account.videos:
+            sorted_videos = sorted(
+                account.videos, key=lambda v: v.performance.views, reverse=True
+            )
+            priority_ids = {
+                v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]
+            }
+            priority = "high" if video_id in priority_ids else "normal"
         return self._metrics_read(video_id, row, priority=priority)
 
     def _apply_user_metrics_to_video(self, video: TikTokVideoData) -> TikTokVideoData:
@@ -341,6 +595,13 @@ class AnalyticsService:
 
             provider = build_tiktok_provider(handle)
             video_data = provider.get_video(video_id)
+            if video_data is None:
+                account, _ = self._fetch_account(handle)
+                if account is not None:
+                    for candidate in account.videos:
+                        if candidate.video.video_id == video_id:
+                            video_data = candidate
+                            break
             if video_data is None:
                 raise NotFoundError(f"Video '{video_id}' not found.")
 
@@ -580,100 +841,18 @@ class AnalyticsService:
                 account_configured=False,
             )
 
-        try:
-            account = build_tiktok_provider(settings.tiktok_handle).get_account()
-        except TikTokFetchError as exc:
-            logger.warning("get_overview.tiktok_fetch_failed: %s", exc.message)
+        account, live_data_error = self._fetch_account(settings.tiktok_handle)
+        if account is None:
             return AccountOverview(
                 tiktok_handle=settings.tiktok_handle,
                 account_configured=True,
-                live_data_error=exc.message,
-            )
-        videos = account.videos
-        if not videos:
-            return AccountOverview(
-                tiktok_handle=settings.tiktok_handle,
-                account_configured=True,
+                live_data_error=live_data_error,
             )
 
-        total_views = sum(v.performance.views for v in videos)
-        engagements = [
-            (
-                v.performance.likes
-                + v.performance.comments
-                + v.performance.shares
-                + v.performance.saves
-            )
-            / max(v.performance.views, 1)
-            for v in videos
-        ]
-        avg_engagement = sum(engagements) / len(engagements)
-
-        sorted_by_views = sorted(videos, key=lambda v: v.performance.views, reverse=True)
-        recent = [
-            {
-                "video_id": v.video.video_id,
-                "title": v.video.title,
-                "views": v.performance.views,
-                "category": v.video.content_category,
-                "publish_date": v.video.publish_date,
-            }
-            for v in videos[-5:]
-        ]
-        best = [
-            {
-                "video_id": v.video.video_id,
-                "title": v.video.title,
-                "views": v.performance.views,
-                "engagement_rate": round(
-                    (v.performance.likes + v.performance.comments) / max(v.performance.views, 1),
-                    4,
-                ),
-            }
-            for v in sorted_by_views[:3]
-        ]
-        worst = [
-            {
-                "video_id": v.video.video_id,
-                "title": v.video.title,
-                "views": v.performance.views,
-            }
-            for v in sorted_by_views[-3:]
-        ]
-
-        heatmap: dict[str, int] = {}
-        for v in videos:
-            day = v.video.publish_date[:10] if v.video.publish_date else "unknown"
-            hour = v.video.publish_time[:2] if v.video.publish_time else "00"
-            key = f"{day}|{hour}"
-            heatmap[key] = heatmap.get(key, 0) + v.performance.views
-
-        trends = [
-            {
-                "video_id": v.video.video_id,
-                "views": v.performance.views,
-                "publish_date": v.video.publish_date,
-            }
-            for v in videos
-        ]
-
-        snapshots = self.repo.list_metrics_snapshots(limit=10)
-        health_scores = [s for s in snapshots if s.metric == "account_health_score"]
-        health = health_scores[0].value if health_scores else round(avg_engagement * 10, 2)
-
-        return AccountOverview(
-            tiktok_handle=settings.tiktok_handle,
-            account_configured=True,
-            account_health_score=min(health, 1.0) if health <= 1 else health / 10,
-            total_videos=len(videos),
-            total_views=total_views,
-            avg_engagement_rate=round(avg_engagement, 4),
-            recent_videos=recent,
-            best_performers=best,
-            worst_performers=worst,
-            posting_heatmap=heatmap,
-            performance_trends=trends,
-            growth_trends=[{"followers": account.follower_count, "period": "current"}],
+        return self._build_overview_from_account(
+            settings.tiktok_handle,
+            account,
+            live_data_error=live_data_error,
         )
 
     def get_competitor_overview(self) -> CompetitorOverview:

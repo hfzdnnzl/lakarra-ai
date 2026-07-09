@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, RefreshCw, Save } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import {
+  hmsToSeconds,
+  percentToRatio,
+  ratioToPercent,
+  secondsToHms,
+} from "@/lib/metric-format";
 import type { VideoCatalogItem } from "@/types";
 
 type Props = {
@@ -26,9 +32,21 @@ export function VideoAnalyticsCard({
   onUpdated,
 }: Props) {
   const [form, setForm] = useState({ ...video.metrics });
+  const [watchTimeDisplay, setWatchTimeDisplay] = useState(() =>
+    secondsToHms(video.metrics.watch_time),
+  );
+  const [completionDisplay, setCompletionDisplay] = useState(() =>
+    ratioToPercent(video.metrics.completion_rate),
+  );
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setForm({ ...video.metrics });
+    setWatchTimeDisplay(secondsToHms(video.metrics.watch_time));
+    setCompletionDisplay(ratioToPercent(video.metrics.completion_rate));
+  }, [video.metrics, video.video_id]);
 
   const setNum = (field: string, value: string) => {
     setForm((prev) => ({
@@ -40,6 +58,18 @@ export function VideoAnalyticsCard({
   const saveMetrics = async () => {
     setSaving(true);
     setError(null);
+    const watchTimeSeconds = hmsToSeconds(watchTimeDisplay);
+    if (watchTimeDisplay.trim() && watchTimeSeconds === null) {
+      setError("Total watch time must be in hh:mm:ss format (e.g. 1:23:45).");
+      setSaving(false);
+      return;
+    }
+    const completionRatio = percentToRatio(completionDisplay);
+    if (completionDisplay.trim() && completionRatio === null) {
+      setError("Completion rate must be a valid percentage (e.g. 45 or 45%).");
+      setSaving(false);
+      return;
+    }
     try {
       await api.updateVideoMetrics(video.video_id, {
         views: form.views ?? undefined,
@@ -48,9 +78,9 @@ export function VideoAnalyticsCard({
         shares: form.shares ?? undefined,
         saves: form.saves ?? undefined,
         reach: form.reach ?? undefined,
-        watch_time: form.watch_time ?? undefined,
+        watch_time: watchTimeSeconds ?? undefined,
         average_watch_duration: form.average_watch_duration ?? undefined,
-        completion_rate: form.completion_rate ?? undefined,
+        completion_rate: completionRatio ?? undefined,
         profile_visits: form.profile_visits ?? undefined,
         followers_gained: form.followers_gained ?? undefined,
         link_clicks: form.link_clicks ?? undefined,
@@ -166,19 +196,57 @@ export function VideoAnalyticsCard({
               Optional metrics (recommended for this best/worst performer)
             </div>
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-              {Object.entries(optionalLabels).map(([field, label]) => (
-                <div key={field} className="space-y-1">
-                  <Label htmlFor={`${video.video_id}-${field}-opt`}>{label}</Label>
-                  <Input
-                    id={`${video.video_id}-${field}-opt`}
-                    type="number"
-                    min={0}
-                    step={field === "completion_rate" ? "0.01" : "1"}
-                    value={form[field as keyof typeof form] ?? ""}
-                    onChange={(e) => setNum(field, e.target.value)}
-                  />
-                </div>
-              ))}
+              {Object.entries(optionalLabels).map(([field, label]) => {
+                if (field === "watch_time") {
+                  return (
+                    <div key={field} className="space-y-1">
+                      <Label htmlFor={`${video.video_id}-${field}-opt`}>{label}</Label>
+                      <Input
+                        id={`${video.video_id}-${field}-opt`}
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0:05:30"
+                        value={watchTimeDisplay}
+                        onChange={(e) => setWatchTimeDisplay(e.target.value)}
+                      />
+                    </div>
+                  );
+                }
+                if (field === "completion_rate") {
+                  return (
+                    <div key={field} className="space-y-1">
+                      <Label htmlFor={`${video.video_id}-${field}-opt`}>{label}</Label>
+                      <div className="relative">
+                        <Input
+                          id={`${video.video_id}-${field}-opt`}
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="45"
+                          className="pr-8"
+                          value={completionDisplay}
+                          onChange={(e) => setCompletionDisplay(e.target.value)}
+                        />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                          %
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={field} className="space-y-1">
+                    <Label htmlFor={`${video.video_id}-${field}-opt`}>{label}</Label>
+                    <Input
+                      id={`${video.video_id}-${field}-opt`}
+                      type="number"
+                      min={0}
+                      step="1"
+                      value={form[field as keyof typeof form] ?? ""}
+                      onChange={(e) => setNum(field, e.target.value)}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
         ) : null}

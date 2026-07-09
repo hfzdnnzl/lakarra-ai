@@ -24,14 +24,14 @@ export default function AnalyticsOverviewPage() {
 
   const load = useCallback(async () => {
     try {
-      const [ov, st, readiness] = await Promise.all([
-        api.analyticsOverview(),
-        api.analyticsAccountSettings(),
-        api.analyticsMetricsReadiness().catch(() => null),
-      ]);
-      setOverview(ov);
+      const st = await api.analyticsAccountSettings();
       setSettings(st);
       setHandleInput(st.tiktok_handle ?? "");
+
+      const ov = await api.analyticsOverview();
+      setOverview(ov);
+
+      const readiness = await api.analyticsMetricsReadiness().catch(() => null);
       setMetricsReady(readiness?.ready ?? null);
       setError(null);
     } catch (e) {
@@ -158,19 +158,21 @@ export default function AnalyticsOverviewPage() {
         <p className="text-muted-foreground">
           Connect your TikTok account above to see performance data and run analyses.
         </p>
-      ) : overview?.live_data_error ? (
-        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Could not fetch live TikTok data: {overview.live_data_error}. You can still enter
-          metrics manually in{" "}
-          <Link href="/analytics/content" className="underline">
-            Content Analytics
-          </Link>
-          .
-        </div>
       ) : !overview ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
         <>
+          {overview.live_data_error ? (
+            <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {overview.total_videos > 0
+                ? `Live TikTok data may be limited: ${overview.live_data_error} Showing available videos below — enter Studio metrics in `
+                : `${overview.live_data_error} Mark content as Posted in the Content library, then open `}
+              <Link href="/analytics/content" className="underline">
+                Content Analytics
+              </Link>
+              {overview.total_videos > 0 ? "." : " to track metrics."}
+            </div>
+          ) : null}
           {overview.tiktok_handle ? (
             <p className="mb-4 text-sm text-muted-foreground">
               Showing data for @{overview.tiktok_handle}

@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     tiktok_api_base_url: str = "https://www.tikwm.com"
     tiktok_max_videos: int = 35
     tiktok_fetch_timeout_seconds: float = 45.0
+    tiktok_cache_ttl_seconds: float = 60.0
+    tiktok_rate_limit_retries: int = 3
+    tiktok_rate_limit_retry_seconds: float = 1.2
 
 
 @lru_cache
