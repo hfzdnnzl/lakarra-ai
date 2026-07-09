@@ -246,7 +246,7 @@ export default function ContentDetailPage() {
               </div>
               <Button
                 type="button"
-                variant="secondary"
+                variant="outline"
                 size="sm"
                 disabled={savingNotes}
                 onClick={savePerformanceNotes}

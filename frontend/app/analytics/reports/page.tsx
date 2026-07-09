@@ -7,7 +7,40 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import type { HistoricalAnalytics } from "@/types";
+import type {
+  AnalysisRecord,
+  AnalyticsSnapshot,
+  CompetitorAnalysisRecord,
+  ContentAnalysisRecord,
+  HistoricalAnalytics,
+  ReviewReportRecord,
+  TrendReportRecord,
+} from "@/types";
+
+type HistoricalRecord =
+  | ContentAnalysisRecord
+  | CompetitorAnalysisRecord
+  | TrendReportRecord
+  | ReviewReportRecord
+  | AnalysisRecord
+  | AnalyticsSnapshot;
+
+function recordTitle(record: HistoricalRecord): string {
+  if ("video_id" in record && record.video_id) return record.video_id;
+  if ("handle" in record && record.handle) return record.handle;
+  if ("period" in record && record.period) return record.period;
+  if ("content_id" in record && record.content_id) return record.content_id;
+  if ("subject_id" in record && record.subject_id) return record.subject_id;
+  if ("metric" in record && record.metric) return record.metric;
+  return record.id;
+}
+
+function recordPayload(record: HistoricalRecord): Record<string, unknown> {
+  if ("payload" in record && record.payload) {
+    return record.payload as Record<string, unknown>;
+  }
+  return record as unknown as Record<string, unknown>;
+}
 
 export default function HistoricalReportsPage() {
   const [data, setData] = useState<HistoricalAnalytics | null>(null);
@@ -36,7 +69,7 @@ export default function HistoricalReportsPage() {
     { key: "metrics_snapshots", label: "Metrics" },
   ];
 
-  const records = data ? data[tab] : [];
+  const records: HistoricalRecord[] = data ? (data[tab] as HistoricalRecord[]) : [];
 
   return (
     <>
@@ -71,30 +104,32 @@ export default function HistoricalReportsPage() {
 
       {!data ? (
         <p className="text-muted-foreground">Loading…</p>
-      ) : (records as unknown[]).length === 0 ? (
+      ) : records.length === 0 ? (
         <EmptyState message="No records in this category yet." />
       ) : (
         <div className="space-y-3">
-          {(records as Array<Record<string, unknown>>).map((r) => (
-            <Card key={String(r.id)}>
+          {records.map((record) => (
+            <Card key={record.id}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium">
-                    {String(r.video_id ?? r.handle ?? r.period ?? r.content_id ?? r.subject_id ?? r.metric ?? r.id)}
-                  </CardTitle>
+                  <CardTitle className="text-sm font-medium">{recordTitle(record)}</CardTitle>
                   <div className="flex gap-2">
-                    {"version" in r ? <Badge variant="muted">v{String(r.version)}</Badge> : null}
-                    <Badge variant="muted">{String(r.agent ?? "snapshot")}</Badge>
+                    {"version" in record && record.version != null ? (
+                      <Badge variant="muted">v{record.version}</Badge>
+                    ) : null}
+                    <Badge variant="muted">
+                      {"agent" in record && record.agent ? record.agent : "snapshot"}
+                    </Badge>
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
                 <pre className="max-h-48 overflow-auto rounded bg-muted p-3 text-xs">
-                  {JSON.stringify(r.payload ?? r, null, 2)}
+                  {JSON.stringify(recordPayload(record), null, 2)}
                 </pre>
-                {"created_at" in r ? (
+                {"created_at" in record && record.created_at ? (
                   <div className="mt-2 text-xs text-muted-foreground">
-                    {new Date(String(r.created_at)).toLocaleString()}
+                    {new Date(record.created_at).toLocaleString()}
                   </div>
                 ) : null}
               </CardContent>

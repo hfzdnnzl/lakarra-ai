@@ -350,21 +350,6 @@ class ReviewReportORM(TimestampMixin, Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class CommentAnalysisORM(TimestampMixin, Base):
-    """Versioned comment intelligence for a video."""
-
-    __tablename__ = "comment_analyses"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    video_id: Mapped[str] = mapped_column(String(128), index=True)
-    version: Mapped[int] = mapped_column(Integer, default=1)
-    agent: Mapped[str] = mapped_column(String(64), default="content_analyst")
-    provider: Mapped[str] = mapped_column(String(64), default="mock")
-    model: Mapped[str] = mapped_column(String(128), default="")
-    prompt_version: Mapped[str] = mapped_column(String(128), default="")
-    payload: Mapped[dict] = mapped_column(JSON, default=dict)
-
-
 class PatternAnalysisORM(TimestampMixin, Base):
     """Versioned historical pattern recognition."""
 

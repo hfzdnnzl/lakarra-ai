@@ -27,16 +27,17 @@ from ..models.analytics import (
     normalize_tiktok_handle,
 )
 from ..providers import TikTokVideoData, build_internal_content_provider, build_tiktok_provider
+from ..providers.metrics_overlay import UserMetricsTikTokProvider
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
 from .video_metrics import (
     METRIC_FIELD_LABELS,
     OPTIONAL_METRIC_FIELDS,
     REQUIRED_METRIC_FIELDS,
-    apply_metrics_to_performance,
     metrics_complete,
     metrics_from_row,
     missing_required,
+    user_notes_from_row,
 )
 
 logger = logging.getLogger("lakarra.analytics_service")
@@ -100,9 +101,13 @@ class AnalyticsService:
             )
         return handle
 
+    def _metrics_aware_provider(self, handle: str):
+        inner = build_tiktok_provider(handle)
+        return UserMetricsTikTokProvider(inner, self.repo.get_video_metrics)
+
     def _bind_tiktok_provider(self) -> str:
         handle = self._require_handle()
-        self._analyst.set_tiktok_provider(build_tiktok_provider(handle))
+        self._analyst.set_tiktok_provider(self._metrics_aware_provider(handle))
         return handle
 
     # --- Video metrics & catalog -------------------------------------------
@@ -203,10 +208,11 @@ class AnalyticsService:
             )
 
     def get_content_page(self) -> ContentAnalyticsPage:
+        handle = self._require_handle()
+        provider = self._metrics_aware_provider(handle)
         overview = self.get_overview()
         readiness = self.get_metrics_readiness()
-        handle = self._require_handle()
-        account = build_tiktok_provider(handle).get_account()
+        account = provider.get_account()
         analyses = self.repo.get_latest_analyses_map()
         sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
@@ -267,17 +273,14 @@ class AnalyticsService:
         priority = "high" if video_id in priority_ids else "normal"
         return self._metrics_read(video_id, row, priority=priority)
 
-    def _apply_user_metrics_to_video(self, video: TikTokVideoData) -> TikTokVideoData:
-        row = self.repo.get_video_metrics(video.video.video_id)
+    def _require_complete_video_metrics(self, video_id: str, title: str) -> str | None:
+        row = self.repo.get_video_metrics(video_id)
         data = metrics_from_row(row)
         if not metrics_complete(data):
             raise MetricsIncompleteError(
-                f"Complete required metrics for video '{video.video.title}' before analyzing."
+                f"Complete required metrics for video '{title}' before analyzing."
             )
-        perf_dict = video.performance.model_dump()
-        merged = apply_metrics_to_performance(perf_dict, data)
-        video.performance = type(video.performance)(**merged)
-        return video
+        return user_notes_from_row(row)
 
     # --- Analyze operations ------------------------------------------------
     def analyze_video(
@@ -301,19 +304,21 @@ class AnalyticsService:
                         version=existing.version,
                     )
 
-            provider = build_tiktok_provider(handle)
+            provider = self._metrics_aware_provider(handle)
             video_data = provider.get_video(video_id)
             if video_data is None:
                 raise NotFoundError(f"Video '{video_id}' not found.")
 
             self._sync_public_metrics(handle, video_data)
             self.session.flush()
-            video_data = self._apply_user_metrics_to_video(video_data)
+            user_notes = self._require_complete_video_metrics(
+                video_id, video_data.video.title
+            )
 
             posted = self.content_repo.list_past_posts(exclude_id=content_id or "", limit=10)
             historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
             result = self._analyst._analyze_video_data(  # noqa: SLF001
-                video_data, historical_context=historical
+                video_data, historical_context=historical, user_notes=user_notes
             )
             version = self.repo.next_content_analysis_version(video_id)
             row = self.repo.save_content_analysis(
@@ -436,8 +441,17 @@ class AnalyticsService:
     def generate_trend_report(self, *, period: str = "30d") -> AnalysisResponse:
         try:
             self._ensure_metrics_ready()
-            self._bind_tiktok_provider()
-            result = self._analyst.generate_trend_report(period=period)
+            handle = self._bind_tiktok_provider()
+            latest_pattern = self.repo.get_latest_pattern_analysis(handle)
+            pattern_data = latest_pattern.payload if latest_pattern else None
+            if pattern_data is None:
+                account_result = self.analyze_account()
+                if not account_result.success:
+                    return account_result
+                pattern_data = account_result.data or {}
+            result = self._analyst.generate_trend_report(
+                period=period, pattern_data=pattern_data
+            )
             version = self.repo.next_trend_version(period)
             row = self.repo.save_trend_report(
                 period=period,
@@ -472,7 +486,7 @@ class AnalyticsService:
     def analyze_all_videos(self) -> AnalyzeAllResponse:
         handle = self._require_handle()
         self._ensure_metrics_ready()
-        provider = build_tiktok_provider(handle)
+        provider = self._metrics_aware_provider(handle)
         analyzed_ids = self.repo.list_analyzed_video_ids()
         analyzed: list[AnalysisResponse] = []
         skipped: list[str] = []
@@ -542,7 +556,7 @@ class AnalyticsService:
                 account_configured=False,
             )
 
-        account = build_tiktok_provider(settings.tiktok_handle).get_account()
+        account = self._metrics_aware_provider(settings.tiktok_handle).get_account()
         videos = account.videos
         if not videos:
             return AccountOverview(

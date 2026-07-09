@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, RefreshCw, Save } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,11 +30,20 @@ export function VideoAnalyticsCard({
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setForm({ ...video.metrics });
+  }, [video.metrics, video.video_id]);
+
   const setNum = (field: string, value: string) => {
     setForm((prev) => ({
       ...prev,
       [field]: value === "" ? null : Number(value),
     }));
+  };
+
+  const metricValue = (field: string): string | number => {
+    const value = form[field as keyof typeof form];
+    return typeof value === "number" ? value : "";
   };
 
   const saveMetrics = async () => {
@@ -152,7 +161,7 @@ export function VideoAnalyticsCard({
                   id={`${video.video_id}-${field}`}
                   type="number"
                   min={0}
-                  value={form[field as keyof typeof form] ?? ""}
+                  value={metricValue(field)}
                   onChange={(e) => setNum(field, e.target.value)}
                 />
               </div>
@@ -174,7 +183,7 @@ export function VideoAnalyticsCard({
                     type="number"
                     min={0}
                     step={field === "completion_rate" ? "0.01" : "1"}
-                    value={form[field as keyof typeof form] ?? ""}
+                    value={metricValue(field)}
                     onChange={(e) => setNum(field, e.target.value)}
                   />
                 </div>

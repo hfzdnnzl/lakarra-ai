@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from ..models.db import (
     AnalyticsAccountSettingsORM,
-    CommentAnalysisORM,
     CompetitorAnalysisORM,
     ContentAnalysisORM,
     MetricsSnapshotORM,
@@ -283,34 +282,6 @@ class AnalyticsRepository:
         )
         return self.session.scalar(stmt)
 
-    # --- Comment Analysis --------------------------------------------------
-    def save_comment_analysis(
-        self,
-        *,
-        video_id: str,
-        version: int,
-        agent: str,
-        provider: str,
-        model: str,
-        prompt_version: str,
-        payload: dict,
-    ) -> CommentAnalysisORM:
-        row = CommentAnalysisORM(
-            id=_new_id(),
-            video_id=video_id,
-            version=version,
-            agent=agent,
-            provider=provider,
-            model=model,
-            prompt_version=prompt_version,
-            payload=payload,
-        )
-        self.session.add(row)
-        return row
-
-    def next_comment_version(self, video_id: str) -> int:
-        return self._next_version(CommentAnalysisORM, video_id=video_id)
-
     # --- Pattern Analysis --------------------------------------------------
     def save_pattern_analysis(
         self,
@@ -346,6 +317,15 @@ class AnalyticsRepository:
             .limit(limit)
         )
         return list(self.session.scalars(stmt))
+
+    def get_latest_pattern_analysis(self, subject_id: str) -> PatternAnalysisORM | None:
+        stmt = (
+            select(PatternAnalysisORM)
+            .where(PatternAnalysisORM.subject_id == subject_id)
+            .order_by(PatternAnalysisORM.version.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
 
     # --- Metrics Snapshots -------------------------------------------------
     def save_metrics_snapshot(

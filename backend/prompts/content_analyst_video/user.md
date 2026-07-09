@@ -16,4 +16,8 @@ Analyze this Lakarra TikTok video.
 
 {{historical_context}}
 
+## User notes (TikTok Studio / promotions)
+
+{{user_notes}}
+
 Produce a complete analysis following the JSON schema. Never generate new content.

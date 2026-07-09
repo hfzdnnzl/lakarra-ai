@@ -72,6 +72,16 @@ def metrics_complete(metrics: dict[str, float | int | None]) -> bool:
     return len(missing_required(metrics)) == 0
 
 
+def user_notes_from_row(row: Any | None) -> str | None:
+    if row is None:
+        return None
+    notes = getattr(row, "user_notes", None)
+    if notes is None:
+        return None
+    text = str(notes).strip()
+    return text or None
+
+
 def apply_metrics_to_performance(
     performance: dict[str, Any], metrics: dict[str, float | int | None]
 ) -> dict[str, Any]:

@@ -190,14 +190,6 @@ class ReviewReportPayload(BaseModel):
     approval_recommendation: str = ""
 
 
-class CommentAnalysisPayload(BaseModel):
-    """Standalone comment analysis for a video."""
-
-    video_id: str
-    intelligence: CommentIntelligence
-    summary: str = ""
-
-
 class MetricsSnapshotPayload(BaseModel):
     """Point-in-time metrics snapshot."""
 
@@ -274,10 +266,6 @@ class ReviewReportRead(AnalysisRead):
     decision_comment: str | None = None
     decided_by: str | None = None
     decided_at: datetime | None = None
-
-
-class CommentAnalysisRead(AnalysisRead):
-    video_id: str
 
 
 class PatternAnalysisRead(AnalysisRead):

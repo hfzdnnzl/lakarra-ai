@@ -134,6 +134,22 @@ class TestAnalyticsService:
         assert overview.total_videos == 5
         assert overview.total_views > 0
 
+    def test_get_overview_uses_saved_metrics(self, analytics_service: AnalyticsService):
+        from app.models.analytics import VideoMetricsData
+
+        analytics_service.update_video_metrics(
+            "lk-001",
+            VideoMetricsData(
+                views=1_000_000,
+                likes=50_000,
+                comments=1_000,
+                shares=500,
+                saves=2_000,
+            ),
+        )
+        overview = analytics_service.get_overview()
+        assert overview.total_views >= 1_000_000
+
     def test_get_historical(self, analytics_service: AnalyticsService):
         analytics_service.analyze_account()
         historical = analytics_service.get_historical()

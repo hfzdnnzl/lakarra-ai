@@ -317,11 +317,14 @@ class ContentAnalystAgent(BaseAgent):
             ReviewReportPayload,
         )
 
-    def generate_trend_report(self, *, period: str = "30d") -> AgentAnalysisResult:
+    def generate_trend_report(
+        self, *, period: str = "30d", pattern_data: dict | None = None
+    ) -> AgentAnalysisResult:
         """Generate a trend report from historical analysis."""
 
         account = self._tiktok_or_raise().get_account()
-        pattern_result = self.analyze_account()
+        if pattern_data is None:
+            pattern_data = self.analyze_account().payload
         recent = json.dumps(
             [
                 {
@@ -348,7 +351,7 @@ class ContentAnalystAgent(BaseAgent):
             "content_analyst_trend",
             {
                 "period": period,
-                "pattern_data": json.dumps(pattern_result.payload, indent=2),
+                "pattern_data": json.dumps(pattern_data, indent=2),
                 "recent_analyses": recent,
                 "account_metrics": metrics,
             },
@@ -360,6 +363,7 @@ class ContentAnalystAgent(BaseAgent):
         video_data: TikTokVideoData,
         *,
         historical_context: str = "",
+        user_notes: str | None = None,
     ) -> AgentAnalysisResult:
         return self._run_prompt(
             "content_analyst_video",
@@ -368,6 +372,7 @@ class ContentAnalystAgent(BaseAgent):
                 "performance_data": json.dumps(video_data.performance.model_dump(), indent=2),
                 "comments": json.dumps(video_data.comments, indent=2),
                 "historical_context": historical_context or "(no historical context)",
+                "user_notes": user_notes or "(no additional notes from TikTok Studio)",
             },
             ContentAnalysisPayload,
         )

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Loader2, TrendingUp } from "lucide-react";
 
 import { AnalyticsNav } from "@/components/AnalyticsNav";
@@ -9,17 +10,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import type { TrendReportRecord } from "@/types";
+import type { MetricsReadiness, TrendReportRecord } from "@/types";
 
 export default function TrendReportsPage() {
   const [reports, setReports] = useState<TrendReportRecord[]>([]);
+  const [readiness, setReadiness] = useState<MetricsReadiness | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await api.analyticsTrends();
-      setReports(data.reports);
+      const [trends, metricsReadiness] = await Promise.all([
+        api.analyticsTrends(),
+        api.analyticsMetricsReadiness().catch(() => null),
+      ]);
+      setReports(trends.reports);
+      setReadiness(metricsReadiness);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -30,7 +36,15 @@ export default function TrendReportsPage() {
     load();
   }, [load]);
 
+  const ready = readiness?.ready ?? false;
+
   const generate = async () => {
+    if (!ready) {
+      setError(
+        "Complete required metrics for all videos in Content Analytics before generating a trend report.",
+      );
+      return;
+    }
     setBusy(true);
     try {
       await api.generateTrendReport("30d");
@@ -48,7 +62,7 @@ export default function TrendReportsPage() {
         title="Trend Reports"
         description="Historical pattern recognition and strategic recommendations."
         action={
-          <Button onClick={generate} disabled={busy} size="sm">
+          <Button onClick={generate} disabled={busy || !ready} size="sm">
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TrendingUp className="mr-2 h-4 w-4" />}
             Generate Report
           </Button>
@@ -59,6 +73,22 @@ export default function TrendReportsPage() {
         <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
+      ) : null}
+
+      {readiness && !ready ? (
+        <Card className="mb-6 border-amber-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Metrics required</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Complete required video metrics in{" "}
+            <Link href="/analytics/content" className="text-primary underline">
+              Content Analytics
+            </Link>{" "}
+            ({readiness.complete_videos}/{readiness.total_videos} videos ready) before
+            generating trend reports.
+          </CardContent>
+        </Card>
       ) : null}
 
       {reports.length === 0 ? (
