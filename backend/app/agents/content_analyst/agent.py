@@ -15,12 +15,16 @@ from ...config import get_settings
 from ...errors import LakarraError, OutputValidationError
 from ...models.analytics import (
     CompetitorAnalysisPayload,
-    ContentAnalysisPayload,
     PatternAnalysisPayload,
     ReviewReportPayload,
     TrendReportPayload,
 )
 from ...models.content import PerformanceReviewPayload
+from ...models.content_analysis import (
+    AnalysisMode,
+    ContentAnalysisInput,
+    MetricsPassOutput,
+)
 from ...models.db import Content
 from ...models.domain import Report
 from ...providers import (
@@ -30,11 +34,14 @@ from ...providers import (
     TikTokVideoData,
     build_competitor_provider,
 )
+from ...services.content_visual_analysis import build_content_visual_analysis_service
 from ...services.json_utils import extract_json
 from ...services.prompts import load_prompt
 from ...services.video_analysis import build_video_analysis_service, parse_review_json
 from ..base import AgentRequest, AgentResult, BaseAgent
 from ..registry import register_agent
+from .input_builder import build_analysis_input
+from .merge import merge_passes
 
 
 @dataclass
@@ -221,23 +228,114 @@ class ContentAnalystAgent(BaseAgent):
             prompt_version=template.version,
         )
 
-    # --- Phase 3 analysis methods -----------------------------------------
+    # --- Published content analysis (VIDEO + IMAGE) -----------------------
+    def analyze_content(self, analysis_input: ContentAnalysisInput) -> AgentAnalysisResult:
+        """Two-pass analysis: metrics, then optional visual (image or video)."""
+
+        metrics_result = self._run_metrics_pass(analysis_input)
+        visual_result = None
+        analysis_mode = AnalysisMode.METRICS_ONLY
+
+        media = analysis_input.media_source
+        if media and media.has_media() and media.bytes and media.mime_type:
+            visual_result = self._run_visual_pass(analysis_input)
+            analysis_mode = AnalysisMode.FULL
+
+        merged = merge_passes(
+            analysis_input=analysis_input,
+            metrics=metrics_result,
+            visual=visual_result,
+            analysis_mode=analysis_mode,
+        )
+
+        providers = merged.metadata.providers
+        primary = providers.get("visual") or providers.get("metrics", "mock")
+        return AgentAnalysisResult(
+            payload=merged.to_payload(),
+            model=metrics_result.model,
+            provider=primary.split("/")[0] if "/" in primary else primary,
+            prompt_version=metrics_result.prompt_version,
+        )
+
+    def _run_metrics_pass(self, analysis_input: ContentAnalysisInput) -> MetricsPassOutput:
+        result = self._run_prompt(
+            "content_analyst/metrics",
+            {
+                "content_type": analysis_input.content_type.value,
+                "content_metadata": json.dumps(
+                    analysis_input.content_metadata.model_dump(), indent=2
+                ),
+                "performance_data": json.dumps(
+                    analysis_input.performance_data.model_dump(), indent=2
+                ),
+                "comments": json.dumps(analysis_input.comments, indent=2),
+                "historical_context": analysis_input.historical_context
+                or "(no historical context)",
+                "user_notes": analysis_input.user_notes
+                or "(no additional notes from TikTok Studio)",
+            },
+            MetricsPassOutput,
+        )
+        fields = (
+            "engagement",
+            "quality_scores",
+            "retention",
+            "comments",
+            "executive_summary",
+            "performance_diagnosis",
+            "recommendations",
+        )
+        data = {key: result.payload[key] for key in fields if key in result.payload}
+        return MetricsPassOutput(
+            **data,
+            provider=result.provider,
+            model=result.model,
+            prompt_version=result.prompt_version,
+        )
+
+    def _run_visual_pass(self, analysis_input: ContentAnalysisInput):
+
+        media = analysis_input.media_source
+        assert media and media.bytes and media.mime_type
+
+        context = json.dumps(
+            {
+                "content_type": analysis_input.content_type.value,
+                "metadata": analysis_input.content_metadata.model_dump(),
+                "performance": analysis_input.performance_data.model_dump(),
+            },
+            indent=2,
+        )
+        service = build_content_visual_analysis_service()
+        return service.analyze_visual_content(
+            content_type=analysis_input.content_type,
+            media_bytes=media.bytes,
+            mime_type=media.mime_type,
+            context_json=context,
+        )
+
     def analyze_video(
         self,
         video_id: str,
         *,
         content_id: str | None = None,
         historical_context: str = "",
+        user_notes: str | None = None,
     ) -> AgentAnalysisResult:
-        """Analyze a published Lakarra TikTok video."""
+        """Analyze a published TikTok post by ID (delegates to analyze_content)."""
 
         video_data = self._tiktok_or_raise().get_video(video_id)
         if video_data is None:
             from ...errors import NotFoundError
 
-            raise NotFoundError(f"Video '{video_id}' not found.")
+            raise NotFoundError(f"Content '{video_id}' not found.")
 
-        return self._analyze_video_data(video_data, historical_context=historical_context)
+        analysis_input = build_analysis_input(
+            video_data,
+            historical_context=historical_context,
+            user_notes=user_notes,
+        )
+        return self.analyze_content(analysis_input)
 
     def analyze_account(self) -> AgentAnalysisResult:
         """Analyze historical Lakarra account performance and detect patterns."""
@@ -365,23 +463,21 @@ class ContentAnalystAgent(BaseAgent):
         historical_context: str = "",
         user_notes: str | None = None,
     ) -> AgentAnalysisResult:
-        return self._run_prompt(
-            "content_analyst_video",
-            {
-                "video_data": json.dumps(video_data.video.model_dump(), indent=2),
-                "performance_data": json.dumps(video_data.performance.model_dump(), indent=2),
-                "comments": json.dumps(video_data.comments, indent=2),
-                "historical_context": historical_context or "(no historical context)",
-                "user_notes": user_notes or "(no additional notes from TikTok Studio)",
-            },
-            ContentAnalysisPayload,
+        """Backward-compatible alias for analyze_content."""
+
+        return self.analyze_content(
+            build_analysis_input(
+                video_data,
+                historical_context=historical_context,
+                user_notes=user_notes,
+            )
         )
 
     def analyze_all_videos(self) -> list[AgentAnalysisResult]:
-        """Analyze every published video on the Lakarra account."""
+        """Analyze every published post on the Lakarra account."""
 
         return [
-            self._analyze_video_data(v)
+            self.analyze_content(build_analysis_input(v))
             for v in self._tiktok_or_raise().get_account().videos
         ]
 
@@ -406,12 +502,17 @@ class ContentAnalystAgent(BaseAgent):
                 result = self.analyze_account()
                 output = {"action": "account", "patterns": result.payload}
 
+            analysis_blob = (
+                output.get("analysis") or output.get("patterns") or output.get("report") or {}
+            )
+            summary = analysis_blob.get("executive_summary") or analysis_blob.get(
+                "summary", "Analysis complete."
+            )
             self.context.memory.reports.add(
                 Report(
                     agent=self.name,
                     title=f"Content analysis: {action}",
-                    summary=output.get("analysis", output.get("patterns", output.get("report", {})))
-                    .get("summary", "Analysis complete."),
+                    summary=summary,
                     payload=output,
                 )
             )

@@ -39,6 +39,7 @@ class VideoInfo(BaseModel):
     duration: int = 0
     thumbnail: str = ""
     content_category: str = ""
+    content_type: str = "VIDEO"  # VIDEO | IMAGE
 
 
 class PerformanceMetrics(BaseModel):

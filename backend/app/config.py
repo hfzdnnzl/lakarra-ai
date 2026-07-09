@@ -74,9 +74,11 @@ class Settings(BaseSettings):
     # --- Scheduler ---------------------------------------------------------
     scheduler_enabled: bool = False
 
-    # --- Video analysis (upload review) ------------------------------------
+    # --- Video / visual analysis -------------------------------------------
     video_analysis_provider: Literal["mock", "gemini", "openai"] = "mock"
     video_analysis_model: str = "gemini-2.0-flash"
+    visual_analysis_provider: Literal["mock", "gemini", "openai"] | None = None
+    visual_analysis_model: str | None = None
     max_upload_bytes: int = 52_428_800  # 50 MB
     allowed_upload_mime_types: list[str] = Field(
         default_factory=lambda: ["video/mp4", "video/quicktime", "video/webm"]

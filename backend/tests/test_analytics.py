@@ -56,7 +56,7 @@ class TestContentAnalystAgent:
 
     def test_analyze_all_videos(self, analyst: ContentAnalystAgent):
         results = analyst.analyze_all_videos()
-        assert len(results) == 5
+        assert len(results) == 6
 
 
 class TestAnalyticsService:
@@ -131,7 +131,7 @@ class TestAnalyticsService:
 
     def test_get_overview(self, analytics_service: AnalyticsService):
         overview = analytics_service.get_overview()
-        assert overview.total_videos == 5
+        assert overview.total_videos == 6
         assert overview.total_views > 0
 
     def test_get_overview_uses_saved_metrics(self, analytics_service: AnalyticsService):
@@ -181,7 +181,7 @@ class TestAnalyticsAPI:
       assert resp.status_code == 200
       data = resp.json()
       assert "total_videos" in data
-      assert data["total_videos"] == 5
+      assert data["total_videos"] == 6
 
   def test_analyze_account_endpoint(self, client: TestClient):
       resp = client.post("/api/analytics/account/analyze")
@@ -211,7 +211,7 @@ class TestAnalyticsAPI:
       data = resp.json()
       assert "videos" in data
       assert "readiness" in data
-      assert len(data["videos"]) == 5
+      assert len(data["videos"]) == 6
 
   def test_update_video_metrics_endpoint(self, client: TestClient):
       resp = client.put(

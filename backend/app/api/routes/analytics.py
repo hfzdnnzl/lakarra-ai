@@ -64,14 +64,26 @@ def analyze_account(service: AnalyticsService = Depends(_service)) -> AnalysisRe
     return result
 
 
+@router.post("/content/{content_id}/analyze", response_model=AnalysisResponse)
+def analyze_content_by_id(
+    content_id: str,
+    force: bool = False,
+    service: AnalyticsService = Depends(_service),
+) -> AnalysisResponse:
+    result = service.analyze_content(content_id, force=force)
+    if not result.success:
+        raise HTTPException(status_for(result.error_type), detail=result.error)
+    return result
+
+
 @router.post("/videos/analyze", response_model=AnalysisResponse)
 def analyze_video(
     body: AnalyzeVideoRequest,
     force: bool = False,
     service: AnalyticsService = Depends(_service),
 ) -> AnalysisResponse:
-    result = service.analyze_video(
-        body.video_id, content_id=body.content_id, force=force
+    result = service.analyze_content(
+        body.video_id, content_id_cms=body.content_id, force=force
     )
     if not result.success:
         raise HTTPException(status_for(result.error_type), detail=result.error)
@@ -84,7 +96,7 @@ def analyze_video_by_id(
     force: bool = False,
     service: AnalyticsService = Depends(_service),
 ) -> AnalysisResponse:
-    result = service.analyze_video(video_id, force=force)
+    result = service.analyze_content(video_id, force=force)
     if not result.success:
         raise HTTPException(status_for(result.error_type), detail=result.error)
     return result

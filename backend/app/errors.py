@@ -72,6 +72,11 @@ class MetricsIncompleteError(LakarraError):
     http_status = 400
 
 
+class InvalidContentTypeError(LakarraError):
+    error_type = "invalid_content_type"
+    http_status = 400
+
+
 _ERROR_CLASSES = [
     MissingAPIKeyError,
     LLMTimeoutError,
@@ -83,6 +88,7 @@ _ERROR_CLASSES = [
     MissingAccountHandleError,
     TikTokFetchError,
     MetricsIncompleteError,
+    InvalidContentTypeError,
 ]
 
 #: Map of ``error_type`` -> suggested HTTP status.

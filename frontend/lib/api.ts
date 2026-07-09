@@ -140,6 +140,11 @@ export const api = {
       `/analytics/videos/${video_id}/analyze?force=${force}`,
       { method: "POST" },
     ),
+  analyzeContentById: (content_id: string, force = false) =>
+    request<import("@/types").AnalysisResponse>(
+      `/analytics/content/${content_id}/analyze?force=${force}`,
+      { method: "POST" },
+    ),
   analyticsCompetitors: () => request<import("@/types").CompetitorOverview>("/analytics/competitors"),
   analyticsTrends: () =>
     request<{ reports: import("@/types").TrendReportRecord[] }>("/analytics/trends"),

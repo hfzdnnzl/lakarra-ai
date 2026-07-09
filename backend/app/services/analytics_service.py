@@ -283,6 +283,19 @@ class AnalyticsService:
         return user_notes_from_row(row)
 
     # --- Analyze operations ------------------------------------------------
+    def analyze_content(
+        self,
+        content_id: str,
+        *,
+        content_id_cms: str | None = None,
+        force: bool = False,
+    ) -> AnalysisResponse:
+        """Analyze published VIDEO or IMAGE content by platform content ID."""
+
+        return self._analyze_published_content(
+            content_id, content_id_cms=content_id_cms, force=force
+        )
+
     def analyze_video(
         self,
         video_id: str,
@@ -290,10 +303,21 @@ class AnalyticsService:
         content_id: str | None = None,
         force: bool = False,
     ) -> AnalysisResponse:
+        """Legacy alias — delegates to analyze_content."""
+
+        return self.analyze_content(video_id, content_id_cms=content_id, force=force)
+
+    def _analyze_published_content(
+        self,
+        content_id: str,
+        *,
+        content_id_cms: str | None = None,
+        force: bool = False,
+    ) -> AnalysisResponse:
         try:
             handle = self._bind_tiktok_provider()
             if not force:
-                existing = self.repo.get_latest_analysis_for_video(video_id)
+                existing = self.repo.get_latest_analysis_for_video(content_id)
                 if existing is not None:
                     return AnalysisResponse(
                         success=True,
@@ -305,25 +329,27 @@ class AnalyticsService:
                     )
 
             provider = self._metrics_aware_provider(handle)
-            video_data = provider.get_video(video_id)
+            video_data = provider.get_video(content_id)
             if video_data is None:
-                raise NotFoundError(f"Video '{video_id}' not found.")
+                raise NotFoundError(f"Content '{content_id}' not found.")
 
             self._sync_public_metrics(handle, video_data)
             self.session.flush()
             user_notes = self._require_complete_video_metrics(
-                video_id, video_data.video.title
+                content_id, video_data.video.title
             )
 
-            posted = self.content_repo.list_past_posts(exclude_id=content_id or "", limit=10)
-            historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
-            result = self._analyst._analyze_video_data(  # noqa: SLF001
-                video_data, historical_context=historical, user_notes=user_notes
+            posted = self.content_repo.list_past_posts(
+                exclude_id=content_id_cms or "", limit=10
             )
-            version = self.repo.next_content_analysis_version(video_id)
+            historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
+            result = self._analyst.analyze_video(
+                content_id, historical_context=historical, user_notes=user_notes
+            )
+            version = self.repo.next_content_analysis_version(content_id)
             row = self.repo.save_content_analysis(
-                video_id=video_id,
-                content_id=content_id,
+                video_id=content_id,
+                content_id=content_id_cms,
                 version=version,
                 agent=self._analyst.name,
                 provider=result.provider,

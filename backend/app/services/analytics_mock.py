@@ -19,6 +19,7 @@ from ..models.analytics import (
     ScoreWithExplanation,
     TrendReportPayload,
 )
+from ..models.content_analysis import MetricsPassOutput
 from ..providers import TikTokVideoData
 
 
@@ -76,6 +77,87 @@ def build_video_analysis_response(
         ),
         summary=f"Video '{v.title}' performed well with {p.views:,} views and "
         f"{engagement.engagement_rate:.1%} engagement rate.",
+        recommendations=ContentRecommendations(
+            content_categories=[v.content_category, "testimonial"],
+            content_angles=["Before/after reveal", "Customer reaction"],
+            hook_improvements=["Test question-format hooks", "Add text overlay in first 0.5s"],
+            posting_schedule=["Friday 19:00", "Saturday 11:00"],
+            experiments=["A/B test hook variants", "Try 15s vs 30s duration"],
+            strategy_gaps=["Limited POV content", "No trend-jacking this week"],
+        ),
+    )
+    return json.dumps(payload.model_dump(), indent=2)
+
+
+def build_metrics_pass_response(
+    video_data: TikTokVideoData,
+    *,
+    historical_context: str = "",
+) -> str:
+    """Metrics-only pass output for the unified content analysis pipeline."""
+
+    v = video_data.video
+    p = video_data.performance
+    views = max(p.views, 1)
+    engagement = EngagementMetrics(
+        engagement_rate=round((p.likes + p.comments + p.shares + p.saves) / views, 4),
+        share_rate=round(p.shares / views, 4),
+        save_rate=round(p.saves / views, 4),
+        like_to_view_ratio=round(p.likes / views, 4),
+        comment_to_view_ratio=round(p.comments / views, 4),
+        follower_conversion_rate=round(p.followers_gained / views, 4),
+    )
+    content_label = "image post" if v.content_type == "IMAGE" else "video"
+    payload = MetricsPassOutput(
+        engagement=engagement,
+        quality_scores=QualityScores(
+            hook_score=_score_obj(0.78, "Strong opening visual with clear scroll-stop element"),
+            retention_score=_score_obj(
+                p.completion_rate if v.content_type == "VIDEO" else 0.6,
+                "Based on completion rate from metrics"
+                if v.content_type == "VIDEO"
+                else "Retention metrics not applicable to image posts",
+            ),
+            cta_score=_score_obj(0.65, "CTA present but could be more prominent"),
+            pacing_score=_score_obj(0.72, "Good pacing for the duration"),
+            storytelling_score=_score_obj(0.7, "Clear narrative arc"),
+            emotional_impact=_score_obj(0.82, "Emotional resonance with target audience"),
+            educational_value=_score_obj(
+                0.55 if v.content_category != "educational" else 0.85,
+                "Educational value varies by category",
+            ),
+            overall_content_health=_score_obj(0.74, "Solid performer with room for optimization"),
+        ),
+        retention=RetentionAnalysis(
+            strongest_timestamp="0:02" if v.content_type == "VIDEO" else "n/a",
+            weakest_timestamp=f"0:{max(v.duration - 5, 1):02d}"
+            if v.content_type == "VIDEO"
+            else "n/a",
+            drop_off_points=["Mid-video transition", "Final 3 seconds"]
+            if v.content_type == "VIDEO"
+            else [],
+        pacing_issues=(
+            []
+            if p.completion_rate > 0.5 or v.content_type == "IMAGE"
+            else ["Slow middle section"]
+        ),
+            scene_transition_issues=[],
+        ),
+        comments=CommentIntelligence(
+            sentiment="positive",
+            repeated_questions=["How much does this cost?", "Can I customize colors?"],
+            feature_requests=["More template options", "Indian wedding themes"],
+            customer_objections=["Prefer paper invites"],
+            purchase_intent="moderate-high",
+            most_common_keywords=["beautiful", "wedding", "customize", "link"],
+        ),
+        executive_summary=(
+            f"{content_label.title()} '{v.title}' performed well with {p.views:,} views "
+            f"and {engagement.engagement_rate:.1%} engagement rate."
+        ),
+        performance_diagnosis=(
+            "Engagement is above account average; saves and shares indicate strong intent."
+        ),
         recommendations=ContentRecommendations(
             content_categories=[v.content_category, "testimonial"],
             content_angles=["Before/after reveal", "Customer reaction"],
@@ -200,6 +282,8 @@ def build_trend_report_response(period: str, patterns: PatternAnalysisPayload) -
 
 def detect_analyst_prompt_type(system_text: str) -> str | None:
     lower = system_text.lower()
+    if "video and image posts" in lower or "metrics pass" in lower:
+        return "metrics"
     if "analyze published tiktok videos" in lower:
         return "video"
     if "historical account performance" in lower:
@@ -219,6 +303,17 @@ def build_analyst_mock_response(system_text: str, user_text: str) -> str | None:
     prompt_type = detect_analyst_prompt_type(system_text)
     if prompt_type is None:
         return None
+
+    if prompt_type == "metrics":
+        video_id_match = re.search(r'"video_id":\s*"([^"]+)"', user_text)
+        from ..providers import MockTikTokProvider
+
+        provider = MockTikTokProvider("lakarra")
+        vid = video_id_match.group(1) if video_id_match else "lk-001"
+        data = provider.get_video(vid)
+        if data is None:
+            data = provider.get_account().videos[0]
+        return build_metrics_pass_response(data)
 
     if prompt_type == "video":
         video_id_match = re.search(r'"video_id":\s*"([^"]+)"', user_text)

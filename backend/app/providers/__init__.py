@@ -98,6 +98,7 @@ _MOCK_VIDEOS = [
         "comments": 187,
         "shares": 412,
         "saves": 890,
+        "content_type": "VIDEO",
     },
     {
         "video_id": "lk-002",
@@ -110,6 +111,7 @@ _MOCK_VIDEOS = [
         "comments": 542,
         "shares": 1200,
         "saves": 2100,
+        "content_type": "VIDEO",
     },
     {
         "video_id": "lk-003",
@@ -122,6 +124,7 @@ _MOCK_VIDEOS = [
         "comments": 67,
         "shares": 89,
         "saves": 340,
+        "content_type": "VIDEO",
     },
     {
         "video_id": "lk-004",
@@ -134,6 +137,7 @@ _MOCK_VIDEOS = [
         "comments": 312,
         "shares": 678,
         "saves": 1450,
+        "content_type": "VIDEO",
     },
     {
         "video_id": "lk-005",
@@ -146,6 +150,20 @@ _MOCK_VIDEOS = [
         "comments": 890,
         "shares": 2300,
         "saves": 3800,
+        "content_type": "VIDEO",
+    },
+    {
+        "video_id": "lk-img-001",
+        "title": "Save-the-date carousel hero",
+        "category": "aesthetic",
+        "hook": "The invite that made everyone ask where we got it",
+        "duration": 0,
+        "views": 92000,
+        "likes": 7100,
+        "comments": 410,
+        "shares": 980,
+        "saves": 2600,
+        "content_type": "IMAGE",
     },
 ]
 
@@ -246,6 +264,7 @@ class MockTikTokProvider(TikTokProvider):
                 duration=raw["duration"],
                 thumbnail=f"/mock/thumbnails/{raw['video_id']}.jpg",
                 content_category=raw["category"],
+                content_type=raw.get("content_type", "VIDEO"),
             )
             perf = _build_performance(raw, self._rng)
             videos.append(
