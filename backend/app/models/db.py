@@ -425,6 +425,8 @@ class VideoMetricsORM(TimestampMixin, Base):
     followers_gained: Mapped[int | None] = mapped_column(Integer, nullable=True)
     link_clicks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    publish_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    publish_time: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class VideoUploadORM(TimestampMixin, Base):

@@ -18,7 +18,7 @@ export default function ContentAnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState<string | null>(null);
-  const [expandAll, setExpandAll] = useState(true);
+  const [expandAll, setExpandAll] = useState(false);
 
   useEffect(() => {
     void api.health().then((health) => {

@@ -13,6 +13,7 @@ import json
 import logging
 import subprocess
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -134,6 +135,8 @@ class MockVideoAnalysisService(VideoAnalysisService):
 
 
 class GeminiVideoAnalysisService(VideoAnalysisService):
+    _PROCESS_POLL_SECONDS = 2.0
+
     def analyze(
         self,
         *,
@@ -149,14 +152,16 @@ class GeminiVideoAnalysisService(VideoAnalysisService):
             )
 
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
         except ImportError as exc:  # pragma: no cover
             raise LLMCallError(
-                "The 'google-generativeai' package is not installed."
+                "The 'google-genai' package is not installed."
             ) from exc
 
-        genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel(effective_video_analysis_model(settings))
+        client = genai.Client(api_key=settings.gemini_api_key)
+        model = effective_video_analysis_model(settings)
+        max_wait = max(settings.llm_timeout_seconds, 120.0)
 
         suffix = ".mp4" if "mp4" in mime_type else ".mov" if "quicktime" in mime_type else ".webm"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -164,15 +169,22 @@ class GeminiVideoAnalysisService(VideoAnalysisService):
             tmp_path = tmp.name
 
         try:
-            uploaded = genai.upload_file(tmp_path, mime_type=mime_type)
-            response = model.generate_content(
-                [
+            uploaded = client.files.upload(
+                file=tmp_path,
+                config=types.UploadFileConfig(mime_type=mime_type),
+            )
+            uploaded = _wait_for_gemini_file(client, uploaded, max_wait=max_wait)
+            response = client.models.generate_content(
+                model=model,
+                contents=[
                     review_prompt,
                     f"Content plan JSON:\n{plan_json}",
                     uploaded,
                 ],
-                generation_config={"response_mime_type": "application/json"},
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
+        except LLMCallError:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise LLMCallError(f"Gemini video analysis failed: {exc}") from exc
         finally:
@@ -182,6 +194,24 @@ class GeminiVideoAnalysisService(VideoAnalysisService):
         if not text.strip():
             raise LLMCallError("Gemini returned an empty video analysis response.")
         return text
+
+
+def _wait_for_gemini_file(client, uploaded, *, max_wait: float):
+    """Poll until Gemini finishes preprocessing an uploaded video."""
+
+    deadline = time.monotonic() + max_wait
+    current = uploaded
+    while True:
+        state = getattr(current, "state", None)
+        state_name = getattr(state, "name", None) if state is not None else None
+        if state_name == "ACTIVE":
+            return current
+        if state_name == "FAILED":
+            raise LLMCallError("Gemini file processing failed.")
+        if time.monotonic() >= deadline:
+            raise LLMCallError("Gemini file processing timed out.")
+        time.sleep(GeminiVideoAnalysisService._PROCESS_POLL_SECONDS)
+        current = client.files.get(name=current.name)
 
 
 class OpenAIVideoAnalysisService(VideoAnalysisService):

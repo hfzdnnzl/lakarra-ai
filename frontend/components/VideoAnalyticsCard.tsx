@@ -45,6 +45,25 @@ function cloneMetrics(metrics: VideoMetrics) {
   return { ...metrics };
 }
 
+function formatPostedAt(date: string, time?: string | null) {
+  const d = date.trim();
+  const t = time?.trim() ?? "";
+  if (d && t) return `${d} ${t}`;
+  if (d) return d;
+  if (t) return t;
+  return "No date";
+}
+
+function metricInputValue(metrics: VideoMetrics, field: string): string | number {
+  const value = metrics[field as keyof VideoMetrics];
+  return typeof value === "number" ? value : "";
+}
+
+function metricDisplayValue(metrics: VideoMetrics, field: string): number | null {
+  const value = metrics[field as keyof VideoMetrics];
+  return typeof value === "number" ? value : null;
+}
+
 export function VideoAnalyticsCard({
   video,
   requiredLabels,
@@ -54,11 +73,13 @@ export function VideoAnalyticsCard({
 }: Props) {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const label = videoDisplayLabel(video);
-  const [expanded, setExpanded] = useState(
-    expandAll ?? !video.metrics.required_complete,
-  );
+  const [expanded, setExpanded] = useState(expandAll ?? false);
   const [editing, setEditing] = useState(() => !hasSavedMetrics(video.metrics));
   const [form, setForm] = useState(() => cloneMetrics(video.metrics));
+  const [publishDateDisplay, setPublishDateDisplay] = useState(() => video.publish_date ?? "");
+  const [publishTimeDisplay, setPublishTimeDisplay] = useState(
+    () => video.publish_time ?? video.metrics.publish_time ?? "",
+  );
   const [watchTimeDisplay, setWatchTimeDisplay] = useState(() =>
     secondsToHms(video.metrics.watch_time),
   );
@@ -73,9 +94,11 @@ export function VideoAnalyticsCard({
 
   const resetForm = useCallback(() => {
     setForm(cloneMetrics(video.metrics));
+    setPublishDateDisplay(video.publish_date ?? "");
+    setPublishTimeDisplay(video.publish_time ?? video.metrics.publish_time ?? "");
     setWatchTimeDisplay(secondsToHms(video.metrics.watch_time));
     setCompletionDisplay(ratioToPercent(video.metrics.completion_rate));
-  }, [video.metrics]);
+  }, [video.metrics, video.publish_date, video.publish_time]);
 
   useEffect(() => {
     resetForm();
@@ -83,8 +106,8 @@ export function VideoAnalyticsCard({
   }, [video.metrics, video.video_id, resetForm]);
 
   useEffect(() => {
-    setExpanded(expandAll ?? !video.metrics.required_complete);
-  }, [expandAll, video.metrics.required_complete]);
+    setExpanded(expandAll ?? false);
+  }, [expandAll]);
 
   const setNum = (field: string, value: string) => {
     setForm((prev) => ({
@@ -129,6 +152,8 @@ export function VideoAnalyticsCard({
         followers_gained: form.followers_gained ?? undefined,
         link_clicks: form.link_clicks ?? undefined,
         user_notes: form.user_notes ?? undefined,
+        publish_date: publishDateDisplay.trim() || null,
+        publish_time: publishTimeDisplay.trim() || null,
       });
       setEditing(false);
       onUpdated();
@@ -232,7 +257,7 @@ export function VideoAnalyticsCard({
         <Label htmlFor={`${video.video_id}-${field}-opt`}>{labelText}</Label>
         {readOnly ? (
           <p className="rounded-md bg-muted/60 px-3 py-2 text-sm">
-            {formatMetricDisplay(field, form[field as keyof VideoMetrics] as number | null)}
+            {formatMetricDisplay(field, metricDisplayValue(form, field))}
           </p>
         ) : (
           <Input
@@ -240,7 +265,7 @@ export function VideoAnalyticsCard({
             type="number"
             min={0}
             step="1"
-            value={form[field as keyof typeof form] ?? ""}
+            value={metricInputValue(form, field)}
             onChange={(e) => setNum(field, e.target.value)}
           />
         )}
@@ -269,7 +294,7 @@ export function VideoAnalyticsCard({
           <div className="min-w-0 flex-1">
             <CardTitle className="line-clamp-2 text-base leading-snug">{label}</CardTitle>
             <div className="mt-1.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <span>{video.publish_date || "No date"}</span>
+              <span>{formatPostedAt(video.publish_date, video.publish_time)}</span>
               {video.duration ? <span>{video.duration}s</span> : null}
               {video.is_analyzed ? (
                 <Badge variant="success">Analyzed v{video.analysis_version}</Badge>
@@ -280,7 +305,7 @@ export function VideoAnalyticsCard({
                 video.analysis_mode === "full" ? (
                   <Badge variant="success">Full analysis</Badge>
                 ) : (
-                  <Badge variant="secondary">Metrics only</Badge>
+                  <Badge variant="muted">Metrics only</Badge>
                 )
               ) : null}
               {video.has_video_upload ? (
@@ -470,6 +495,47 @@ export function VideoAnalyticsCard({
 
           <div>
             <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Posted
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor={`${video.video_id}-publish-date`}>Date posted</Label>
+                {editing ? (
+                  <Input
+                    id={`${video.video_id}-publish-date`}
+                    type="date"
+                    value={publishDateDisplay}
+                    onChange={(e) => setPublishDateDisplay(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-md bg-muted/60 px-3 py-2 text-sm">
+                    {publishDateDisplay || "—"}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor={`${video.video_id}-publish-time`}>Time posted</Label>
+                {editing ? (
+                  <Input
+                    id={`${video.video_id}-publish-time`}
+                    type="time"
+                    value={publishTimeDisplay}
+                    onChange={(e) => setPublishTimeDisplay(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-md bg-muted/60 px-3 py-2 text-sm">
+                    {publishTimeDisplay || "—"}
+                  </p>
+                )}
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Override TikTok auto-detected date and time from TikTok Studio if needed.
+            </p>
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Required · TikTok Studio
             </div>
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
@@ -481,12 +547,12 @@ export function VideoAnalyticsCard({
                       id={`${video.video_id}-${field}`}
                       type="number"
                       min={0}
-                      value={form[field as keyof typeof form] ?? ""}
+                      value={metricInputValue(form, field)}
                       onChange={(e) => setNum(field, e.target.value)}
                     />
                   ) : (
                     <p className="rounded-md bg-muted/60 px-3 py-2 text-sm font-medium">
-                      {formatMetricDisplay(field, form[field as keyof VideoMetrics] as number | null)}
+                      {formatMetricDisplay(field, metricDisplayValue(form, field))}
                     </p>
                   )}
                 </div>

@@ -58,6 +58,7 @@ from .video_metrics import (
     metrics_complete,
     metrics_from_row,
     missing_required,
+    resolve_publish_metadata,
     video_display_label,
 )
 from .video_source import resolve_video_source
@@ -427,6 +428,11 @@ class AnalyticsService:
             visual_review = (
                 VisualReviewPayload(**visual_raw) if isinstance(visual_raw, dict) else None
             )
+            publish_date, publish_time = resolve_publish_metadata(
+                row,
+                default_date=video.video.publish_date,
+                default_time=video.video.publish_time,
+            )
             catalog.append(
                 VideoCatalogItem(
                     video_id=vid,
@@ -435,7 +441,8 @@ class AnalyticsService:
                     ),
                     url=video.video.url,
                     caption=video.video.caption,
-                    publish_date=video.video.publish_date,
+                    publish_date=publish_date,
+                    publish_time=publish_time,
                     duration=video.video.duration,
                     thumbnail=video.video.thumbnail,
                     is_analyzed=latest is not None,
@@ -551,6 +558,8 @@ class AnalyticsService:
             metrics_priority=priority,
             **{k: data.get(k) for k in REQUIRED_METRIC_FIELDS + OPTIONAL_METRIC_FIELDS},
             user_notes=row.user_notes if row else None,
+            publish_date=row.publish_date if row else None,
+            publish_time=row.publish_time if row else None,
         )
 
     def get_metrics_readiness(self) -> MetricsReadiness:
@@ -660,6 +669,11 @@ class AnalyticsService:
         perf_dict = video.performance.model_dump()
         merged = apply_metrics_to_performance(perf_dict, data)
         video.performance = type(video.performance)(**merged)
+        if row is not None:
+            if row.publish_date:
+                video.video.publish_date = row.publish_date
+            if row.publish_time:
+                video.video.publish_time = row.publish_time
         return video
 
     # --- Analyze operations ------------------------------------------------

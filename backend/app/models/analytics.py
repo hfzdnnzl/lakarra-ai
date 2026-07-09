@@ -545,6 +545,8 @@ class VideoMetricsData(BaseModel):
     followers_gained: int | None = None
     link_clicks: int | None = None
     user_notes: str | None = None
+    publish_date: str | None = None
+    publish_time: str | None = None
 
 
 class VideoMetricsRead(VideoMetricsData):
@@ -560,6 +562,7 @@ class VideoCatalogItem(BaseModel):
     url: str = ""
     caption: str = ""
     publish_date: str = ""
+    publish_time: str = ""
     duration: int = 0
     thumbnail: str = ""
     is_analyzed: bool = False
@@ -568,7 +571,7 @@ class VideoCatalogItem(BaseModel):
     analysis_summary: str | None = None
     analysis_mode: Literal["full", "metrics_only"] = "metrics_only"
     visual_analysis_provider: Literal["mock", "gemini", "openai"] | None = None
-    has_video_upload: bool = False;
+    has_video_upload: bool = False
     upload_filename: str | None = None
     visual_review: VisualReviewPayload | None = None
     metrics: VideoMetricsRead

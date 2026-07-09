@@ -26,7 +26,7 @@ def test_auto_prefers_gemini_when_key_present(monkeypatch: pytest.MonkeyPatch):
 
 def test_auto_uses_openai_when_only_openai_key(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VIDEO_ANALYSIS_PROVIDER", "auto")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
     settings = Settings()
     assert effective_video_analysis_provider(settings) == "openai"

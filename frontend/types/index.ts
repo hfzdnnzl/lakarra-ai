@@ -384,6 +384,8 @@ export interface VideoMetrics {
   followers_gained?: number | null;
   link_clicks?: number | null;
   user_notes?: string | null;
+  publish_date?: string | null;
+  publish_time?: string | null;
   required_complete: boolean;
   missing_required: string[];
   metrics_priority: string;
@@ -407,6 +409,7 @@ export interface VideoCatalogItem {
   url: string;
   caption: string;
   publish_date: string;
+  publish_time?: string;
   duration: number;
   thumbnail: string;
   is_analyzed: boolean;

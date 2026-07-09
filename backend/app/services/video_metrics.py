@@ -108,3 +108,16 @@ def video_display_label(*, title: str = "", caption: str = "") -> str:
     if cleaned and not cleaned.lower().startswith("video "):
         return cleaned[:120]
     return cleaned or "Untitled video"
+
+
+def resolve_publish_metadata(
+    row: Any | None,
+    *,
+    default_date: str = "",
+    default_time: str = "",
+) -> tuple[str, str]:
+    """User-edited publish date/time overrides TikTok API values when set."""
+
+    date = (row.publish_date if row and row.publish_date else None) or default_date
+    time = (row.publish_time if row and row.publish_time else None) or default_time
+    return date, time

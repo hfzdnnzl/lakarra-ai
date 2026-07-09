@@ -388,10 +388,27 @@ class TestAnalyticsAPI:
   def test_update_video_metrics_endpoint(self, client: TestClient):
       resp = client.put(
           "/api/analytics/videos/lk-001/metrics",
-          json={"views": 50000, "likes": 1000, "comments": 50, "shares": 20, "saves": 80},
+          json={
+              "views": 50000,
+              "likes": 1000,
+              "comments": 50,
+              "shares": 20,
+              "saves": 80,
+              "publish_date": "2026-03-15",
+              "publish_time": "18:30",
+          },
       )
       assert resp.status_code == 200
-      assert resp.json()["required_complete"] is True
+      data = resp.json()
+      assert data["required_complete"] is True
+      assert data["publish_date"] == "2026-03-15"
+      assert data["publish_time"] == "18:30"
+
+      content = client.get("/api/analytics/content")
+      assert content.status_code == 200
+      video = next(v for v in content.json()["videos"] if v["video_id"] == "lk-001")
+      assert video["publish_date"] == "2026-03-15"
+      assert video["publish_time"] == "18:30"
 
   def test_analyze_all_skips_endpoint(self, client: TestClient):
       client.post("/api/analytics/videos/lk-001/analyze")
