@@ -5,6 +5,7 @@ Reusable primitives and sectioned analysis for Content Analyst and future agents
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -15,6 +16,85 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from .content_types import ContentType
 
 __all__ = ["ContentType"]
+
+logger = logging.getLogger("lakarra.content_analysis")
+
+_RECOMMENDATION_TEXT_ALIASES: tuple[str, ...] = (
+    "recommendation",
+    "action",
+    "suggestion",
+    "improvement",
+    "idea",
+    "title",
+    "summary",
+    "point",
+    "fix",
+    "tip",
+    "advice",
+    "detail",
+    "content",
+    "description",
+    "message",
+)
+
+
+def _extract_recommendation_text(item: dict) -> str | None:
+    text = item.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    if text is not None and not isinstance(text, str):
+        return str(text).strip() or None
+    for key in _RECOMMENDATION_TEXT_ALIASES:
+        candidate = item.get(key)
+        if candidate is None:
+            continue
+        candidate_text = str(candidate).strip()
+        if candidate_text:
+            return candidate_text
+    return None
+
+
+def _sanitize_recommendations(value: Any) -> list[Any]:
+    """Drop malformed recommendation items instead of failing the whole analysis.
+
+    LLM output occasionally omits ``text`` or ``evidence`` for a nested recommendation
+    despite prompt guidance. Rather than raising a validation error for the entire
+    payload over one bad item, log a warning and keep only well-formed entries.
+    """
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+
+    sanitized: list[Any] = []
+    for item in value:
+        if not isinstance(item, dict):
+            logger.warning("recommendation.dropped_non_dict_item item=%r", item)
+            continue
+
+        text = _extract_recommendation_text(item)
+        if not text:
+            logger.warning("recommendation.dropped_missing_text item=%r", item)
+            continue
+
+        evidence = item.get("evidence")
+        if evidence is None:
+            evidence_list: list[Any] = []
+        elif isinstance(evidence, list):
+            evidence_list = evidence
+        else:
+            evidence_list = [evidence]
+        if not evidence_list:
+            logger.warning("recommendation.dropped_missing_evidence text=%r", text)
+            continue
+
+        normalized = dict(item)
+        normalized["text"] = text
+        normalized["evidence"] = evidence_list
+        sanitized.append(normalized)
+    return sanitized
 
 
 def _coerce_str_list(value: Any) -> list[str]:
@@ -143,26 +223,9 @@ class Recommendation(BaseModel):
         if not isinstance(value, dict):
             return value
         normalized = dict(value)
-        text = normalized.get("text")
-        if text is None or (isinstance(text, str) and not text.strip()):
-            for key in (
-                "recommendation",
-                "action",
-                "suggestion",
-                "improvement",
-                "idea",
-                "title",
-                "summary",
-            ):
-                candidate = normalized.get(key)
-                if candidate is None:
-                    continue
-                candidate_text = str(candidate).strip()
-                if candidate_text:
-                    normalized["text"] = candidate_text
-                    break
-        elif not isinstance(text, str):
-            normalized["text"] = str(text)
+        text = _extract_recommendation_text(normalized)
+        if text:
+            normalized["text"] = text
         return normalized
 
     @field_validator("evidence", mode="before")
@@ -188,6 +251,11 @@ class RatedDimension(BaseModel):
     @classmethod
     def _coerce_lists(cls, value: Any) -> list[str]:
         return _coerce_str_list(value)
+
+    @field_validator("recommendations", mode="before")
+    @classmethod
+    def _sanitize_recommendations(cls, value: Any) -> list[Any]:
+        return _sanitize_recommendations(value)
 
 
 def _coerce_rated_dimension(value: Any) -> Any:
@@ -293,6 +361,11 @@ class SceneAnalysis(BaseModel):
     confidence: Confidence
     explanation: str
     recommendations: list[Recommendation] = Field(default_factory=list)
+
+    @field_validator("recommendations", mode="before")
+    @classmethod
+    def _sanitize_recommendations(cls, value: Any) -> list[Any]:
+        return _sanitize_recommendations(value)
 
 
 class RootCause(BaseModel):
@@ -484,6 +557,13 @@ class RecommendationsSection(BaseModel):
     immediate_improvements: list[Recommendation] = Field(default_factory=list)
     experiments: list[Recommendation] = Field(default_factory=list)
     future_content_ideas: list[Recommendation] = Field(default_factory=list)
+
+    @field_validator(
+        "immediate_improvements", "experiments", "future_content_ideas", mode="before"
+    )
+    @classmethod
+    def _sanitize_recommendations(cls, value: Any) -> list[Any]:
+        return _sanitize_recommendations(value)
 
 
 class AnalysisMetadata(BaseModel):

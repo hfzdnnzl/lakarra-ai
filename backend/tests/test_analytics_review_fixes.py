@@ -108,22 +108,51 @@ class TestReviewFixes:
         db_session.add(content)
         db_session.commit()
 
-        resp = analytics_service.analyze_content("lk-001", force=True)
+        repo = AnalyticsRepository(db_session)
+        repo.upsert_video_upload(
+            video_id="lk-001",
+            tiktok_handle="lakarra",
+            storage_key="analytics/lk-001/full.mp4",
+            mime_type="video/mp4",
+            file_size=20,
+            original_filename="clip.mp4",
+        )
+        db_session.commit()
+
+        mock_storage = MagicMock()
+        mock_storage.read_object.return_value = b"uploaded-video-bytes"
+        with patch("app.services.media_resolver.get_storage", return_value=mock_storage):
+            resp = analytics_service.analyze_content("lk-001", force=True)
+
         assert resp.success is True
         assert resp.data["metadata"].get("linked_content_id") == content.id
 
     def test_analyze_all_uses_fetch_account_fallback(
         self, analytics_service: AnalyticsService, monkeypatch: pytest.MonkeyPatch
     ):
-        account = TikTokAccountData(handle="lakarra", follower_count=0, videos=[])
-
         def fake_fetch(_handle: str):
             post = MockTikTokProvider("lakarra").get_video("lk-002")
             assert post is not None
             return TikTokAccountData(handle="lakarra", follower_count=0, videos=[post]), "offline"
 
+        def fake_media(*args, **kwargs):
+            return type(
+                "Media",
+                (),
+                {
+                    "has_media": True,
+                    "content_type": None,
+                    "bytes": b"x",
+                    "mime_type": "video/mp4",
+                    "source": "analytics_upload",
+                    "download_url": None,
+                    "carousel": None,
+                },
+            )()
+
         monkeypatch.setattr(analytics_service, "_fetch_account", fake_fetch)
         monkeypatch.setattr(analytics_service, "_ensure_metrics_ready", lambda: None)
+        monkeypatch.setattr("app.services.analytics_service.resolve_media_source", fake_media)
 
         result = analytics_service.analyze_all_videos()
         assert result.errors == []

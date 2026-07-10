@@ -68,4 +68,14 @@ Do not review pages independently only. Evaluate the entire user journey.
 }
 ```
 
+Every populated `recommendations` array (in any per-dimension field above, at the slide or
+whole-carousel level) MUST use exactly this object shape — no other keys are accepted:
+
+```json
+{"text": "Add a swipe-forward cue on slide 2", "evidence": [{"source": "swipe_motivation", "description": "Slide 2 ends with no visual or text cue to continue"}]}
+```
+
+This same `{"text": ..., "evidence": [...]}` shape also applies to `performance_diagnosis.root_causes[]`
+and the top-level `recommendations.immediate_improvements` / `experiments` / `future_content_ideas` arrays.
+
 Include one `page_effectiveness` entry per slide in swipe order. List 3–6 carousel root causes ranked by impact.

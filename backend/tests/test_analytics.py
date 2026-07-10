@@ -109,17 +109,8 @@ class TestAnalyticsService:
 
     def test_analyze_video_persists(self, analytics_service: AnalyticsService, db_session: Session):
         resp = analytics_service.analyze_video("lk-001")
-        assert resp.success is True
-        assert resp.analysis_id is not None
-        assert resp.version == 1
-        assert resp.data is not None
-        assert resp.data.get("metadata", {}).get("analysis_mode") == "metrics_only"
-        assert "executive_summary" in resp.data
-        assert "performance_diagnosis" in resp.data
-
-        repo = AnalyticsRepository(db_session)
-        rows = repo.list_content_analyses(video_id="lk-001")
-        assert len(rows) == 1
+        assert resp.success is False
+        assert resp.error_type == "missing_media"
 
     def test_analyze_video_full_with_analytics_upload(
         self,
@@ -178,8 +169,25 @@ class TestAnalyticsService:
         assert uploaded.upload_filename == "posted.mp4"
 
     def test_versioning_never_overwrites(self, analytics_service: AnalyticsService):
-        first = analytics_service.analyze_video("lk-002")
-        second = analytics_service.analyze_video("lk-002", force=True)
+        from unittest.mock import MagicMock, patch
+
+        repo = AnalyticsRepository(analytics_service.session)
+        repo.upsert_video_upload(
+            video_id="lk-002",
+            tiktok_handle="lakarra",
+            storage_key="analytics/lk-002/full.mp4",
+            mime_type="video/mp4",
+            file_size=20,
+            original_filename="clip.mp4",
+        )
+        analytics_service.session.commit()
+
+        mock_storage = MagicMock()
+        mock_storage.read_object.return_value = b"uploaded-video-bytes"
+        with patch("app.services.media_resolver.get_storage", return_value=mock_storage):
+            first = analytics_service.analyze_video("lk-002")
+            second = analytics_service.analyze_video("lk-002", force=True)
+
         assert first.success and second.success
         assert first.version == 1
         assert second.version == 2
@@ -188,17 +196,60 @@ class TestAnalyticsService:
         assert not second.skipped
 
     def test_analyze_skips_already_analyzed(self, analytics_service: AnalyticsService):
-        first = analytics_service.analyze_video("lk-003")
-        second = analytics_service.analyze_video("lk-003")
+        from unittest.mock import MagicMock, patch
+
+        repo = AnalyticsRepository(analytics_service.session)
+        repo.upsert_video_upload(
+            video_id="lk-003",
+            tiktok_handle="lakarra",
+            storage_key="analytics/lk-003/full.mp4",
+            mime_type="video/mp4",
+            file_size=20,
+            original_filename="clip.mp4",
+        )
+        analytics_service.session.commit()
+
+        mock_storage = MagicMock()
+        mock_storage.read_object.return_value = b"uploaded-video-bytes"
+        with patch("app.services.media_resolver.get_storage", return_value=mock_storage):
+            first = analytics_service.analyze_video("lk-003")
+            second = analytics_service.analyze_video("lk-003")
+
         assert first.success and not first.skipped
         assert second.success and second.skipped
         assert second.skip_reason == "already_analyzed"
 
     def test_analyze_all_skips_analyzed(self, analytics_service: AnalyticsService):
-        analytics_service.analyze_video("lk-001")
-        result = analytics_service.analyze_all_videos()
+        from unittest.mock import MagicMock, patch
+
+        repo = AnalyticsRepository(analytics_service.session)
+        repo.upsert_video_upload(
+            video_id="lk-001",
+            tiktok_handle="lakarra",
+            storage_key="analytics/lk-001/full.mp4",
+            mime_type="video/mp4",
+            file_size=20,
+            original_filename="clip.mp4",
+        )
+        repo.upsert_video_upload(
+            video_id="lk-002",
+            tiktok_handle="lakarra",
+            storage_key="analytics/lk-002/full.mp4",
+            mime_type="video/mp4",
+            file_size=20,
+            original_filename="clip.mp4",
+        )
+        analytics_service.session.commit()
+
+        mock_storage = MagicMock()
+        mock_storage.read_object.return_value = b"uploaded-video-bytes"
+        with patch("app.services.media_resolver.get_storage", return_value=mock_storage):
+            analytics_service.analyze_video("lk-001")
+            result = analytics_service.analyze_all_videos()
+
         assert "lk-001" in result.skipped_video_ids
-        assert len(result.analyzed) >= 1
+        assert any(item.error_type == "missing_media" for item in result.analyzed) is False
+        assert any(e.get("error_type") == "missing_media" for e in result.errors)
 
     def test_analyze_competitor_persists(self, analytics_service: AnalyticsService):
         resp = analytics_service.analyze_competitor("greenvelope")
@@ -291,6 +342,8 @@ class TestAnalyticsService:
         assert len(page.videos) == 1
         assert page.videos[0].video_id == "lk-stale"
         assert page.readiness.total_videos == 1
+        assert page.readiness.media_ready is False
+        assert len(page.readiness.missing_media_videos) == 1
 
     def test_get_content_page_falls_back_to_posted_cms_content(
         self,
@@ -381,8 +434,8 @@ class TestAnalyticsAPI:
           "/api/analytics/videos/analyze",
           json={"video_id": "lk-001"},
       )
-      assert resp.status_code == 200
-      assert resp.json()["success"] is True
+      assert resp.status_code == 400
+      assert "media" in resp.json()["detail"].lower()
 
   def test_analyze_competitor_endpoint(self, client: TestClient):
       resp = client.post(
@@ -393,18 +446,14 @@ class TestAnalyticsAPI:
       assert resp.json()["success"] is True
 
   def test_content_page_endpoint(self, client: TestClient):
-      client.post("/api/analytics/videos/lk-001/analyze")
       resp = client.get("/api/analytics/content")
       assert resp.status_code == 200
       data = resp.json()
       assert "videos" in data
       assert "readiness" in data
       assert len(data["videos"]) == 5
-      analyzed = next(v for v in data["videos"] if v["video_id"] == "lk-001")
-      assert analyzed["is_analyzed"] is True
-      assert analyzed.get("analysis") is not None
-      assert "executive_summary" in analyzed["analysis"]
-      assert isinstance(analyzed["analysis"].get("content_ratings"), list)
+      assert data["readiness"]["media_ready"] is False
+      assert len(data["readiness"]["missing_media_videos"]) >= 1
 
   def test_update_video_metrics_endpoint(self, client: TestClient):
       resp = client.put(
@@ -432,11 +481,11 @@ class TestAnalyticsAPI:
       assert video["publish_time"] == "18:30"
 
   def test_analyze_all_skips_endpoint(self, client: TestClient):
-      client.post("/api/analytics/videos/lk-001/analyze")
       resp = client.post("/api/analytics/videos/analyze-all")
       assert resp.status_code == 200
       data = resp.json()
-      assert "lk-001" in data["skipped_video_ids"]
+      assert len(data["analyzed"]) == 0
+      assert any(err.get("error_type") == "missing_media" for err in data["errors"])
       resp = client.get("/api/analytics/historical")
       assert resp.status_code == 200
       data = resp.json()

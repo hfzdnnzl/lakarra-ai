@@ -574,9 +574,12 @@ class VideoUploadRead(BaseModel):
 
 class MetricsReadiness(BaseModel):
     ready: bool = False
+    media_ready: bool = False
     total_videos: int = 0
     complete_videos: int = 0
+    media_complete_videos: int = 0
     incomplete_videos: list[dict] = Field(default_factory=list)
+    missing_media_videos: list[dict] = Field(default_factory=list)
     required_fields: list[str] = Field(default_factory=list)
     optional_fields: list[str] = Field(default_factory=list)
     optional_recommended_for: list[str] = Field(default_factory=list)

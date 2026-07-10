@@ -16,6 +16,7 @@ from ..errors import (
     LakarraError,
     MetricsIncompleteError,
     MissingAccountHandleError,
+    MissingMediaError,
     NotFoundError,
     TikTokFetchError,
 )
@@ -395,7 +396,9 @@ class AnalyticsService:
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
 
         incomplete: list[dict] = []
+        missing_media: list[dict] = []
         complete = 0
+        media_complete = 0
         optional_recommended: list[str] = []
         for video in account.videos:
             vid = video.video.video_id
@@ -420,15 +423,54 @@ class AnalyticsService:
                 if optional_missing:
                     optional_recommended.append(vid)
 
+            content_type = getattr(video.video, "content_type", ContentType.VIDEO)
+            media = resolve_media_source(
+                self.session,
+                post_id=vid,
+                tiktok_handle=handle,
+                content_type=content_type,
+            )
+            if media.has_media:
+                media_complete += 1
+            else:
+                missing_media.append(
+                    {
+                        "video_id": vid,
+                        "title": video_display_label(
+                            title=video.video.title, caption=video.video.caption
+                        ),
+                        "content_type": content_type.value,
+                    }
+                )
+
         return MetricsReadiness(
-            ready=complete == len(account.videos) and len(account.videos) > 0,
+            ready=(
+                complete == len(account.videos)
+                and media_complete == len(account.videos)
+                and len(account.videos) > 0
+            ),
+            media_ready=media_complete == len(account.videos) and len(account.videos) > 0,
             total_videos=len(account.videos),
             complete_videos=complete,
+            media_complete_videos=media_complete,
             incomplete_videos=incomplete,
+            missing_media_videos=missing_media,
             required_fields=list(REQUIRED_METRIC_FIELDS),
             optional_fields=list(OPTIONAL_METRIC_FIELDS),
             optional_recommended_for=optional_recommended,
         )
+
+    @staticmethod
+    def _missing_media_message(post_id: str) -> str:
+        return (
+            f"Content '{post_id}' has no media attached for analysis. "
+            "Upload the posted media (video, image, or carousel) before analyzing."
+        )
+
+    def _ensure_media_available(self, *, post_id: str, media_source) -> None:
+        if media_source.has_media:
+            return
+        raise MissingMediaError(self._missing_media_message(post_id))
 
     def _build_video_catalog(
         self, handle: str, account: TikTokAccountData
@@ -600,7 +642,11 @@ class AnalyticsService:
 
     def _ensure_metrics_ready(self) -> None:
         readiness = self.get_metrics_readiness()
-        if not readiness.ready:
+        metrics_ready = (
+            readiness.complete_videos == readiness.total_videos
+            and readiness.total_videos > 0
+        )
+        if not metrics_ready:
             missing_titles = ", ".join(
                 v["title"][:40] for v in readiness.incomplete_videos[:5]
             )
@@ -758,6 +804,7 @@ class AnalyticsService:
             )
             if media.content_type:
                 resolved_type = media.content_type
+            self._ensure_media_available(post_id=post_id, media_source=media)
 
             posted = self.content_repo.list_past_posts(exclude_id="", limit=10)
             historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
@@ -783,22 +830,21 @@ class AnalyticsService:
             visual_provider: str | None = None
             visual_model: str | None = None
             visual_prompt_version: str | None = None
-            if media.has_media:
-                visual_provider = effective_visual_analysis_provider()
-                visual_model = effective_visual_analysis_model()
-                analysis_media = MediaSource(
-                    bytes=media.bytes,
-                    mime_type=media.mime_type,
-                    url=media.download_url,
-                    carousel=media.carousel,
-                )
-                visual_pass = self._analyst.analyze_visual_content(
-                    analysis_input,
-                    analysis_media,
-                )
-                visual_prompt_version = load_prompt(
-                    resolve_visual_prompt_key(resolved_type)
-                ).version
+            visual_provider = effective_visual_analysis_provider()
+            visual_model = effective_visual_analysis_model()
+            analysis_media = MediaSource(
+                bytes=media.bytes,
+                mime_type=media.mime_type,
+                url=media.download_url,
+                carousel=media.carousel,
+            )
+            visual_pass = self._analyst.analyze_visual_content(
+                analysis_input,
+                analysis_media,
+            )
+            visual_prompt_version = load_prompt(
+                resolve_visual_prompt_key(resolved_type)
+            ).version
 
             version = self.repo.next_content_analysis_version(post_id)
             merged = merge_passes(
@@ -807,7 +853,7 @@ class AnalyticsService:
                 visual=visual_pass,
                 performance=performance_section,
                 analysis_version=version,
-                analysis_mode="full" if visual_pass else "metrics_only",
+                analysis_mode="full",
                 media_source=media.source,
                 linked_content_id=linked_content_id,
                 metrics_provider=metrics_result.provider,
@@ -1007,6 +1053,24 @@ class AnalyticsService:
             if vid in analyzed_ids:
                 skipped.append(vid)
                 continue
+
+            content_type = getattr(video_data.video, "content_type", ContentType.VIDEO)
+            media = resolve_media_source(
+                self.session,
+                post_id=vid,
+                tiktok_handle=handle,
+                content_type=content_type,
+            )
+            if not media.has_media:
+                errors.append(
+                    {
+                        "video_id": vid,
+                        "error": self._missing_media_message(vid),
+                        "error_type": "missing_media",
+                    }
+                )
+                continue
+
             resp = self.analyze_video(vid)
             if resp.success and not resp.skipped:
                 analyzed.append(resp)

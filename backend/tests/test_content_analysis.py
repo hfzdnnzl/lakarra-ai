@@ -105,11 +105,62 @@ class TestContentAnalysisFlows:
 
         assert section.hook.recommendations[0].text == "Open with a stronger movement cue."
 
+    def test_video_recommendation_malformed_items_are_dropped_not_fatal(self):
+        """A single malformed recommendation (no usable text/evidence) must not fail the
+        whole analysis — it should be dropped while well-formed siblings survive."""
+        from app.models.content_analysis import VideoContentAnalysisSection
+
+        section = VideoContentAnalysisSection(
+            type="VIDEO",
+            hook={
+                "rating": "good",
+                "score": 8,
+                "confidence": "medium",
+                "explanation": "Hook lands in the first second.",
+                "recommendations": [
+                    # No "text" and no recognized alias key at all.
+                    {"unexpected_key": "Do something better."},
+                    # Has text but no evidence — also unusable.
+                    {"text": "Trim the intro by half a second."},
+                    # Well-formed — should survive.
+                    {
+                        "text": "Open with a stronger movement cue.",
+                        "evidence": [
+                            {
+                                "source": "retention",
+                                "description": "3-second hold dips after frame one.",
+                            }
+                        ],
+                    },
+                ],
+            },
+            story_script={
+                "rating": "good",
+                "score": 7,
+                "confidence": "medium",
+                "explanation": "Structure is clear.",
+            },
+            voiceover={
+                "rating": "average",
+                "score": 6,
+                "confidence": "low",
+                "explanation": "Voice pacing varies.",
+            },
+            pacing={
+                "rating": "average",
+                "score": 6,
+                "confidence": "low",
+                "explanation": "Middle section drags.",
+            },
+        )
+
+        assert len(section.hook.recommendations) == 1
+        assert section.hook.recommendations[0].text == "Open with a stronger movement cue."
+
     def test_video_metrics_only(self, analytics_service: AnalyticsService):
         resp = analytics_service.analyze_content("lk-001", force=True)
-        assert resp.success is True
-        assert resp.data["metadata"]["content_type"] == "VIDEO"
-        assert resp.data["metadata"]["analysis_mode"] == "metrics_only"
+        assert resp.success is False
+        assert resp.error_type == "missing_media"
 
     def test_video_full_with_upload(self, analytics_service: AnalyticsService, db_session: Session):
         repo = AnalyticsRepository(db_session)
@@ -138,10 +189,8 @@ class TestContentAnalysisFlows:
             content_type=ContentType.IMAGE,
             force=True,
         )
-        assert resp.success is True
-        assert resp.data["metadata"]["content_type"] == "IMAGE"
-        assert resp.data["metadata"]["analysis_mode"] == "metrics_only"
-        assert resp.data["content_analysis"]["type"] == "IMAGE"
+        assert resp.success is False
+        assert resp.error_type == "missing_media"
 
     def test_image_full_with_upload(self, analytics_service: AnalyticsService, db_session: Session):
         repo = AnalyticsRepository(db_session)
@@ -180,14 +229,12 @@ class TestContentAnalysisFlows:
         _ = analytics_service
         client = TestClient(app)
         resp = client.post("/api/analytics/content/lk-001/analyze?force=true")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["success"] is True
-        assert body["data"]["metadata"]["content_type"] == "VIDEO"
+        assert resp.status_code == 400
+        assert "media" in resp.json()["detail"].lower()
 
     def test_legacy_video_endpoint_delegates(self, analytics_service: AnalyticsService):
         _ = analytics_service
         client = TestClient(app)
         resp = client.post("/api/analytics/videos/lk-002/analyze?force=true")
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
+        assert resp.status_code == 400
+        assert "media" in resp.json()["detail"].lower()

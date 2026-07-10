@@ -49,4 +49,14 @@ story/script, voice-over, pacing, and scene-by-scene effectiveness.
 }
 ```
 
+Every populated `recommendations` array (in `hook`, `story_script`, `voiceover`, `pacing`, or any
+`scenes[]` entry) MUST use exactly this object shape — no other keys are accepted:
+
+```json
+{"text": "Add on-screen hook text within the first 0.5 seconds", "evidence": [{"source": "scene", "description": "0:00–0:01 shows only b-roll with no text overlay"}]}
+```
+
+This same `{"text": ..., "evidence": [...]}` shape also applies to `performance_diagnosis.root_causes[]`
+and the top-level `recommendations.immediate_improvements` / `experiments` / `future_content_ideas` arrays.
+
 Analyze each scene with start/end timestamps. List 3–5 visual root causes ranked by impact.

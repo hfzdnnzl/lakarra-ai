@@ -72,6 +72,11 @@ class MetricsIncompleteError(LakarraError):
     http_status = 400
 
 
+class MissingMediaError(LakarraError):
+    error_type = "missing_media"
+    http_status = 400
+
+
 class ConflictError(LakarraError):
     error_type = "conflict"
     http_status = 409
@@ -88,6 +93,7 @@ _ERROR_CLASSES = [
     MissingAccountHandleError,
     TikTokFetchError,
     MetricsIncompleteError,
+    MissingMediaError,
     ConflictError,
 ]
 

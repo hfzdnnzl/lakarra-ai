@@ -44,4 +44,15 @@ CTA visibility, and scroll-stopping potential.
 }
 ```
 
+Every populated `recommendations` array (in `composition`, `typography`, `visual_hierarchy`, `branding`,
+`message_clarity`, `call_to_action`, `visual_appeal`, `color_harmony`, or `scroll_stopping_potential`)
+MUST use exactly this object shape — no other keys are accepted:
+
+```json
+{"text": "Increase CTA button contrast against the background", "evidence": [{"source": "cta", "description": "CTA text uses light grey on white, low contrast"}]}
+```
+
+This same `{"text": ..., "evidence": [...]}` shape also applies to `performance_diagnosis.root_causes[]`
+and the top-level `recommendations.immediate_improvements` / `experiments` / `future_content_ideas` arrays.
+
 List 3–5 visual root causes ranked by impact.
