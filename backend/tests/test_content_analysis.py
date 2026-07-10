@@ -324,3 +324,65 @@ class TestContentAnalysisFlows:
         assert rc.evidence[0].description == "12345"
         assert any("content_analysis.text_defaulted" in r.message for r in caplog.records)
         assert any("content_analysis.text_normalized" in r.message for r in caplog.records)
+
+    def test_root_cause_factor_alias_mapping_and_defaults(self):
+        from app.models.content_analysis import RootCause, Impact, Confidence
+
+        # 1. Test factor resolves from 'text' or other alias when missing
+        rc = RootCause.model_validate({
+            "text": "Intro transitions are too abrupt.",
+            "estimated_impact": "high",
+            "confidence": "high",
+            "explanation": "Many users left in first 2 seconds.",
+            "evidence": [{"source": "retention", "description": "Abrupt scene drop-off."}],
+        })
+        assert rc.factor == "Intro transitions are too abrupt."
+
+        # 2. Test default fallback value when no candidate at all
+        rc_no_factor = RootCause.model_validate({
+            "estimated_impact": "medium",
+            "confidence": "medium",
+            "explanation": "No explanation.",
+            "evidence": [{"source": "metrics", "description": "Some issue"}],
+        })
+        assert rc_no_factor.factor == "Unspecified root cause factor."
+
+    def test_performance_diagnosis_section_sanitizer(self):
+        from app.models.content_analysis import PerformanceDiagnosisSection
+
+        section = PerformanceDiagnosisSection.model_validate({
+            "root_causes": [
+                # Well-formed
+                {
+                    "factor": "Visual fatigue",
+                    "estimated_impact": "high",
+                    "confidence": "high",
+                    "explanation": "Repetitive visuals are shown.",
+                    "evidence": [{"source": "scene", "description": "Scene 3 repeats cover."}],
+                },
+                # Missing factor but has 'text'
+                {
+                    "text": "Intro transitions are too abrupt.",
+                    "estimated_impact": "medium",
+                    "confidence": "medium",
+                    "explanation": "Many users left.",
+                    "evidence": [{"source": "retention", "description": "Abrupt scene drop-off."}],
+                },
+                # Malformed — lacks evidence completely (should be dropped)
+                {
+                    "factor": "Sound levels too loud",
+                    "estimated_impact": "low",
+                    "confidence": "low",
+                    "explanation": "Music drowns voice.",
+                },
+                # Malformed — neither factor nor text (should be dropped)
+                {
+                    "estimated_impact": "high",
+                }
+            ]
+        })
+
+        assert len(section.root_causes) == 2
+        assert section.root_causes[0].factor == "Visual fatigue"
+        assert section.root_causes[1].factor == "Intro transitions are too abrupt."
+

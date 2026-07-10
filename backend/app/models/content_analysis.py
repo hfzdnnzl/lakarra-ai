@@ -101,6 +101,90 @@ def _sanitize_recommendations(value: Any) -> list[Any]:
     return sanitized
 
 
+def _sanitize_root_causes(value: Any) -> list[Any]:
+    """Clean and filter root causes list returned by LLM.
+
+    If an item is missing the 'factor' key, but has 'text' or other common alias,
+    map it. If it doesn't have evidence, or is generally malformed, drop it
+    and log a warning instead of failing the entire analysis payload.
+    """
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+
+    sanitized: list[Any] = []
+    for item in value:
+        if isinstance(item, BaseModel):
+            sanitized.append(item)
+            continue
+        if not isinstance(item, dict):
+            logger.warning("root_cause.dropped_non_dict_item item=%r", item)
+            continue
+
+        normalized = dict(item)
+
+        # Factor / Text handling
+        factor = normalized.get("factor")
+        if factor is None or (isinstance(factor, str) and not factor.strip()):
+            # Try aliases because visual system prompts specify {"text": ..., "evidence": [...]}
+            for key in (
+                "text",
+                "reason",
+                "issue",
+                "cause",
+                "root_cause",
+                "problem",
+                "name",
+                "title",
+                "factor",
+            ):
+                candidate = normalized.get(key)
+                if candidate is not None:
+                    candidate_text = str(candidate).strip()
+                    if candidate_text:
+                        normalized["factor"] = candidate_text
+                        break
+
+        extracted_factor = normalized.get("factor")
+        if not extracted_factor:
+            logger.warning("root_cause.dropped_missing_factor item=%r", item)
+            continue
+
+        if not isinstance(extracted_factor, str):
+            normalized["factor"] = str(extracted_factor)
+
+        # Evidence checking
+        evidence = normalized.get("evidence")
+        if evidence is None:
+            evidence_list: list[Any] = []
+        elif isinstance(evidence, list):
+            evidence_list = evidence
+        else:
+            evidence_list = [evidence]
+
+        if not evidence_list:
+            logger.warning("root_cause.dropped_missing_evidence factor=%r", extracted_factor)
+            continue
+
+        # Explanation
+        explanation = normalized.get("explanation")
+        if explanation is None or (isinstance(explanation, str) and not explanation.strip()):
+            desc = normalized.get("description", extracted_factor)
+            normalized["explanation"] = str(desc).strip() or "Root cause explanation not provided."
+
+        # Impact and confidence defaults (let field_validators coerce further)
+        if "estimated_impact" not in normalized and "impact" in normalized:
+            normalized["estimated_impact"] = normalized["impact"]
+
+        normalized["evidence"] = evidence_list
+        sanitized.append(normalized)
+
+    return sanitized
+
+
 def _coerce_str_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -615,6 +699,51 @@ class RootCause(BaseModel):
     explanation: str
     evidence: list[Evidence] = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_root_cause(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+
+        # Factor / Text handling
+        factor = normalized.get("factor")
+        if factor is None or (isinstance(factor, str) and not factor.strip()):
+            for key in (
+                "text",
+                "reason",
+                "issue",
+                "cause",
+                "root_cause",
+                "problem",
+                "name",
+                "title",
+            ):
+                candidate = normalized.get(key)
+                if candidate is not None:
+                    candidate_text = str(candidate).strip()
+                    if candidate_text:
+                        normalized["factor"] = candidate_text
+                        break
+
+        # Explanation
+        explanation = normalized.get("explanation")
+        if explanation is None or (isinstance(explanation, str) and not explanation.strip()):
+            desc = normalized.get("description", normalized.get("factor", ""))
+            normalized["explanation"] = str(desc).strip() or "Root cause explanation not provided."
+
+        # Impact and confidence
+        if "estimated_impact" not in normalized and "impact" in normalized:
+            normalized["estimated_impact"] = normalized["impact"]
+
+        # Ensure defaults for validation safety
+        normalized.setdefault("estimated_impact", Impact.MEDIUM)
+        normalized.setdefault("confidence", Confidence.MEDIUM)
+        normalized.setdefault("explanation", "Root cause explanation not provided.")
+        normalized.setdefault("factor", "Unspecified root cause factor.")
+        normalized.setdefault("evidence", [])
+        return normalized
+
     @field_validator("evidence", mode="before")
     @classmethod
     def _coerce_evidence(cls, value: Any) -> list[Any]:
@@ -829,6 +958,11 @@ class PerformanceAnalysisSection(BaseModel):
 
 class PerformanceDiagnosisSection(BaseModel):
     root_causes: list[RootCause] = Field(default_factory=list)
+
+    @field_validator("root_causes", mode="before")
+    @classmethod
+    def _sanitize_root_causes(cls, value: Any) -> list[Any]:
+        return _sanitize_root_causes(value)
 
 
 class RecommendationsSection(BaseModel):
