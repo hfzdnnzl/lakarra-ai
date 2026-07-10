@@ -85,9 +85,9 @@ def _safe_filename(name: str) -> str:
 def _video_meta_from_payload(payload: dict) -> dict:
     perf = payload.get("performance_analysis")
     if isinstance(perf, dict):
-        video = perf.get("video")
-        if isinstance(video, dict):
-            return video
+        post = perf.get("post") or perf.get("video")
+        if isinstance(post, dict):
+            return post
     return {}
 
 
@@ -254,7 +254,10 @@ class AnalyticsService:
         }
         videos: list[TikTokVideoData] = []
         for content in items:
-            row = metrics_map.get(content.id)
+            post_id = (content.tiktok_video_id or "").strip()
+            if not post_id:
+                continue
+            row = metrics_map.get(post_id)
             performance = (
                 self._performance_from_metrics_row(row)
                 if row is not None
@@ -263,7 +266,7 @@ class AnalyticsService:
             videos.append(
                 TikTokVideoData(
                     video=VideoInfo(
-                        video_id=content.id,
+                        post_id=post_id,
                         title=content.title,
                         caption=content.caption,
                         hashtags=list(content.hashtags or []),
@@ -734,6 +737,12 @@ class AnalyticsService:
             if post_data is None:
                 raise NotFoundError(f"Content '{post_id}' not found.")
 
+            linked_content_id = content_id
+            if linked_content_id is None:
+                linked = self.content_repo.get_by_tiktok_video_id(post_id)
+                if linked is not None:
+                    linked_content_id = linked.id
+
             self._sync_public_metrics(handle, post_data)
             self.session.flush()
             post_data = self._apply_user_metrics_to_post(post_data)
@@ -756,7 +765,7 @@ class AnalyticsService:
                 self.session,
                 post_data=post_data,
                 post_id=post_id,
-                linked_content_id=content_id,
+                linked_content_id=linked_content_id,
                 content_type_override=resolved_type,
                 historical_context=historical,
                 resolved_media=media,
@@ -800,7 +809,7 @@ class AnalyticsService:
                 analysis_version=version,
                 analysis_mode="full" if visual_pass else "metrics_only",
                 media_source=media.source,
-                linked_content_id=content_id,
+                linked_content_id=linked_content_id,
                 metrics_provider=metrics_result.provider,
                 metrics_model=metrics_result.model,
                 metrics_prompt_version=metrics_result.prompt_version,
@@ -811,7 +820,7 @@ class AnalyticsService:
             merged_payload = merged.model_dump(mode="json")
             row = self.repo.save_content_analysis(
                 video_id=post_id,
-                content_id=content_id,
+                content_id=linked_content_id,
                 version=version,
                 agent=self._analyst.name,
                 provider=metrics_result.provider,
@@ -980,13 +989,20 @@ class AnalyticsService:
     def analyze_all_videos(self) -> AnalyzeAllResponse:
         handle = self._require_handle()
         self._ensure_metrics_ready()
-        provider = build_tiktok_provider(handle)
+        account, _ = self._fetch_account(handle)
+        if account is None or not account.videos:
+            return AnalyzeAllResponse(
+                analyzed=[],
+                skipped_video_ids=[],
+                errors=[{"error": "No videos available to analyze.", "error_type": "not_found"}],
+            )
+
         analyzed_ids = self.repo.list_analyzed_video_ids()
         analyzed: list[AnalysisResponse] = []
         skipped: list[str] = []
         errors: list[dict] = []
 
-        for video_data in provider.get_account().videos:
+        for video_data in account.videos:
             vid = video_data.video.video_id
             if vid in analyzed_ids:
                 skipped.append(vid)

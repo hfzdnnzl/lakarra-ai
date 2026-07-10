@@ -55,7 +55,7 @@ def build_content_analysis_input(
 
     linked_content: Content | None = None
     if linked_content_id:
-        linked_content = ContentRepository(session).get_by_id(linked_content_id)
+        linked_content = ContentRepository(session).get(linked_content_id)
 
     content_type = resolve_content_type(
         post_data=post_data,

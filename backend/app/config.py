@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -77,8 +77,14 @@ class Settings(BaseSettings):
     # --- Visual content analysis (upload review + analytics pass 2) ---------
     # ``auto`` picks gemini when GEMINI_API_KEY is set, else openai when OPENAI_API_KEY
     # is set, otherwise mock. Set explicitly to mock/gemini/openai to override.
-    visual_analysis_provider: Literal["auto", "mock", "gemini", "openai"] = "auto"
-    visual_analysis_model: str = "gemini-2.0-flash"
+    visual_analysis_provider: Literal["auto", "mock", "gemini", "openai"] = Field(
+        default="auto",
+        validation_alias=AliasChoices("VISUAL_ANALYSIS_PROVIDER", "VIDEO_ANALYSIS_PROVIDER"),
+    )
+    visual_analysis_model: str = Field(
+        default="gemini-2.0-flash",
+        validation_alias=AliasChoices("VISUAL_ANALYSIS_MODEL", "VIDEO_ANALYSIS_MODEL"),
+    )
     max_upload_bytes: int = 52_428_800  # 50 MB
     allowed_upload_mime_types: list[str] = Field(
         default_factory=lambda: [
@@ -88,6 +94,7 @@ class Settings(BaseSettings):
             "image/jpeg",
             "image/png",
             "image/webp",
+            "application/vnd.lakarra.carousel+json",
         ]
     )
 

@@ -317,6 +317,7 @@ class TestAnalyticsService:
             posting_time="18:00",
             confidence_score=0.9,
             status="posted",
+            tiktok_video_id="lk-cms-001",
         )
         db_session.add(content)
         db_session.commit()
@@ -333,6 +334,7 @@ class TestAnalyticsService:
         page = analytics_service.get_content_page()
         assert page.overview.live_data_error is not None
         assert len(page.videos) == 1
+        assert page.videos[0].video_id == "lk-cms-001"
         assert page.videos[0].title == "Beautiful digital invites"
 
     def test_get_historical(self, analytics_service: AnalyticsService):

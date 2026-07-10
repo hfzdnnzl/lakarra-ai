@@ -357,7 +357,9 @@ def download_tiktok_carousel(handle: str, post_id: str) -> CarouselMedia | None:
         for index, image_url in enumerate(image_urls):
             response = client.get(image_url, timeout=timeout)
             if response.status_code != 200:
-                continue
+                raise TikTokFetchError(
+                    f"Failed to download carousel slide {index + 1} (HTTP {response.status_code})."
+                )
             raw = response.content
             if len(raw) > max_bytes:
                 raise TikTokFetchError(f"TikTok carousel image exceeds max size ({max_bytes} bytes).")
@@ -367,8 +369,8 @@ def download_tiktok_carousel(handle: str, post_id: str) -> CarouselMedia | None:
             )
             pages.append(CarouselPage(index=index, bytes=raw, mime_type=mime_type))
 
-    if not pages:
-        return None
+    if len(pages) != len(image_urls):
+        raise TikTokFetchError("Incomplete carousel download — not all slides were retrieved.")
     return CarouselMedia(pages=pages)
 
 
