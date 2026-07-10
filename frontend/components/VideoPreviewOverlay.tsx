@@ -6,10 +6,11 @@ import { X } from "lucide-react";
 type Props = {
   src: string;
   title?: string;
+  kind?: "video" | "image";
   onClose: () => void;
 };
 
-export function VideoPreviewOverlay({ src, title, onClose }: Props) {
+export function VideoPreviewOverlay({ src, title, kind = "video", onClose }: Props) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -28,7 +29,7 @@ export function VideoPreviewOverlay({ src, title, onClose }: Props) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
       role="dialog"
       aria-modal="true"
-      aria-label={title ? `Preview: ${title}` : "Video preview"}
+      aria-label={title ? `Preview: ${title}` : kind === "image" ? "Image preview" : "Video preview"}
       onClick={onClose}
     >
       <button
@@ -47,14 +48,24 @@ export function VideoPreviewOverlay({ src, title, onClose }: Props) {
         {title ? (
           <p className="mb-3 max-w-full truncate text-sm text-white/80">{title}</p>
         ) : null}
-        <video
-          key={src}
-          src={src}
-          controls
-          autoPlay
-          playsInline
-          className="max-h-[calc(90vh-2rem)] w-full rounded-lg bg-black object-contain shadow-2xl"
-        />
+        {kind === "image" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={src}
+            src={src}
+            alt={title ?? "Uploaded image preview"}
+            className="max-h-[calc(90vh-2rem)] w-full rounded-lg bg-black object-contain shadow-2xl"
+          />
+        ) : (
+          <video
+            key={src}
+            src={src}
+            controls
+            autoPlay
+            playsInline
+            className="max-h-[calc(90vh-2rem)] w-full rounded-lg bg-black object-contain shadow-2xl"
+          />
+        )}
       </div>
     </div>
   );

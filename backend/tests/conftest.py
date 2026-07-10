@@ -14,7 +14,10 @@ import os
 os.environ["AUTO_INIT_DB"] = "false"
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["LLM_PROVIDER"] = "mock"
-os.environ["VIDEO_ANALYSIS_PROVIDER"] = "mock"
+os.environ["VISUAL_ANALYSIS_PROVIDER"] = "mock"
+os.environ.pop("VIDEO_ANALYSIS_PROVIDER", None)
+os.environ.pop("GEMINI_API_KEY", None)
+os.environ.pop("OPENAI_API_KEY", None)
 os.environ["TIKTOK_ACCOUNT_HANDLE"] = "lakarra"
 os.environ["TIKTOK_PROVIDER"] = "mock"
 

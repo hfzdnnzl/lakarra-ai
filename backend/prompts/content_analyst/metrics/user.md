@@ -1,8 +1,12 @@
-Analyze this Lakarra TikTok video using performance metrics and comments.
+Analyze this Lakarra TikTok {{content_type}} post using performance metrics and comments.
 
-## Video data
+## Content type
 
-{{video_data}}
+{{content_type}}
+
+## Post data
+
+{{post_data}}
 
 ## Performance metrics
 

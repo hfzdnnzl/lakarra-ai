@@ -1,21 +1,21 @@
-"""Build performance_analysis from TikTok video data (WHAT happened — no LLM)."""
+"""Build performance_analysis from TikTok post data (WHAT happened — no LLM)."""
 
 from __future__ import annotations
 
 from ..models.analytics import EngagementMetrics, PerformanceMetrics
-from ..models.content_analysis import PerformanceAnalysisSection
+from ..models.content_analysis import ContentType, PerformanceAnalysisSection
 from ..providers import TikTokVideoData
-from .video_metrics import apply_metrics_to_performance, metrics_from_row
+from .content_metrics import apply_metrics_to_performance, metrics_from_row
 
 
 def build_performance_analysis(
-    video_data: TikTokVideoData,
+    post_data: TikTokVideoData,
     *,
     metrics_row: object | None = None,
 ) -> PerformanceAnalysisSection:
     """Inject measurable performance facts before merge."""
 
-    perf_dict = video_data.performance.model_dump()
+    perf_dict = post_data.performance.model_dump()
     user_metrics = metrics_from_row(metrics_row)
     merged_perf = apply_metrics_to_performance(perf_dict, user_metrics)
     performance = PerformanceMetrics(**merged_perf)
@@ -34,29 +34,38 @@ def build_performance_analysis(
         follower_conversion_rate=round(performance.followers_gained / views, 4),
     )
 
-    completion_pct = f"{performance.completion_rate * 100:.1f}%"
-    summary = (
-        f"The video reached {performance.views:,} views with "
-        f"{engagement.engagement_rate:.1%} engagement rate "
-        f"({performance.likes:,} likes, {performance.comments:,} comments, "
-        f"{performance.shares:,} shares, {performance.saves:,} saves). "
-        f"Completion rate was {completion_pct}."
-    )
-    if performance.average_watch_duration > 0:
-        summary += (
-            f" Average watch duration was {performance.average_watch_duration:.1f}s "
-            f"on a {video_data.video.duration}s video."
+    content_type = getattr(post_data.video, "content_type", ContentType.VIDEO)
+    if content_type == ContentType.IMAGE:
+        summary = (
+            f"The image post reached {performance.views:,} views with "
+            f"{engagement.engagement_rate:.1%} engagement rate "
+            f"({performance.likes:,} likes, {performance.comments:,} comments, "
+            f"{performance.shares:,} shares, {performance.saves:,} saves)."
         )
+    else:
+        completion_pct = f"{performance.completion_rate * 100:.1f}%"
+        summary = (
+            f"The video reached {performance.views:,} views with "
+            f"{engagement.engagement_rate:.1%} engagement rate "
+            f"({performance.likes:,} likes, {performance.comments:,} comments, "
+            f"{performance.shares:,} shares, {performance.saves:,} saves). "
+            f"Completion rate was {completion_pct}."
+        )
+        if performance.average_watch_duration > 0:
+            summary += (
+                f" Average watch duration was {performance.average_watch_duration:.1f}s "
+                f"on a {post_data.video.duration}s video."
+            )
 
-    video = video_data.video.model_copy()
+    post = post_data.video.model_copy()
     if metrics_row is not None:
         if getattr(metrics_row, "publish_date", None):
-            video.publish_date = metrics_row.publish_date
+            post.publish_date = metrics_row.publish_date
         if getattr(metrics_row, "publish_time", None):
-            video.publish_time = metrics_row.publish_time
+            post.publish_time = metrics_row.publish_time
 
     return PerformanceAnalysisSection(
-        video=video,
+        post=post,
         metrics=performance,
         engagement=engagement,
         performance_summary=summary,

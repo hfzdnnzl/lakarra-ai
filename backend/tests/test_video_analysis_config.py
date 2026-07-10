@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from app.config import Settings, effective_video_analysis_provider, get_settings
+from app.config import Settings, effective_visual_analysis_provider, get_settings
 
 
 @pytest.fixture(autouse=True)
@@ -17,32 +17,32 @@ def _clear_settings_cache():
 
 
 def test_auto_prefers_gemini_when_key_present(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("VIDEO_ANALYSIS_PROVIDER", "auto")
+    monkeypatch.setenv("VISUAL_ANALYSIS_PROVIDER", "auto")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     settings = Settings()
-    assert effective_video_analysis_provider(settings) == "gemini"
+    assert effective_visual_analysis_provider(settings) == "gemini"
 
 
 def test_auto_uses_openai_when_only_openai_key(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("VIDEO_ANALYSIS_PROVIDER", "auto")
+    monkeypatch.setenv("VISUAL_ANALYSIS_PROVIDER", "auto")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
     settings = Settings()
-    assert effective_video_analysis_provider(settings) == "openai"
+    assert effective_visual_analysis_provider(settings) == "openai"
 
 
 def test_explicit_mock_stays_mock_even_with_keys(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("VIDEO_ANALYSIS_PROVIDER", "mock")
+    monkeypatch.setenv("VISUAL_ANALYSIS_PROVIDER", "mock")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
     settings = Settings()
-    assert effective_video_analysis_provider(settings) == "mock"
+    assert effective_visual_analysis_provider(settings) == "mock"
 
 
 def test_auto_falls_back_to_mock_without_keys(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("VIDEO_ANALYSIS_PROVIDER", "auto")
+    monkeypatch.setenv("VISUAL_ANALYSIS_PROVIDER", "auto")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("OPENAI_API_KEY", "")
     settings = Settings()
-    assert effective_video_analysis_provider(settings) == "mock"
+    assert effective_visual_analysis_provider(settings) == "mock"

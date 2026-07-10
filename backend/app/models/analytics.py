@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
 def normalize_tiktok_handle(value: str) -> str:
@@ -52,9 +52,7 @@ def normalize_unit_ratio(value: Any) -> float:
     return ratio
 
 
-# ---------------------------------------------------------------------------
-# Shared building blocks
-# ---------------------------------------------------------------------------
+from .content_types import ContentType
 
 
 class ScoreWithExplanation(BaseModel):
@@ -67,8 +65,14 @@ class ScoreWithExplanation(BaseModel):
         return normalize_unit_ratio(value)
 
 
-class VideoInfo(BaseModel):
-    video_id: str
+class PostInfo(BaseModel):
+    """Published TikTok post metadata (video or image)."""
+
+    post_id: str = Field(
+        validation_alias=AliasChoices("post_id", "video_id"),
+        serialization_alias="video_id",
+    )
+    content_type: ContentType = ContentType.VIDEO
     url: str = ""
     title: str = ""
     caption: str = ""
@@ -78,11 +82,21 @@ class VideoInfo(BaseModel):
     @classmethod
     def _coerce_hashtags(cls, value: Any) -> list[str]:
         return coerce_str_list(value)
+
     publish_date: str = ""
     publish_time: str = ""
     duration: int = 0
     thumbnail: str = ""
     content_category: str = ""
+
+    @property
+    def video_id(self) -> str:
+        """DB/API legacy name for post_id."""
+
+        return self.post_id
+
+
+VideoInfo = PostInfo
 
 
 class PerformanceMetrics(BaseModel):
@@ -340,6 +354,11 @@ class AnalyzeVideoRequest(BaseModel):
     content_id: str | None = None
 
 
+class AnalyzeContentRequest(BaseModel):
+    content_id: str | None = None
+    content_type: ContentType | None = None
+
+
 class AnalyzeCompetitorRequest(BaseModel):
     handle: str
 
@@ -514,9 +533,13 @@ class VideoMetricsRead(VideoMetricsData):
     metrics_priority: str = "normal"  # "high" for best/worst performers
 
 
-class VideoCatalogItem(BaseModel):
-    video_id: str
-    title: str
+class ContentCatalogItem(BaseModel):
+    post_id: str = Field(
+        validation_alias=AliasChoices("post_id", "video_id"),
+        serialization_alias="video_id",
+    )
+    content_type: ContentType = ContentType.VIDEO
+    title: str = ""
     url: str = ""
     caption: str = ""
     publish_date: str = ""
@@ -526,11 +549,19 @@ class VideoCatalogItem(BaseModel):
     is_analyzed: bool = False
     analysis_version: int | None = None
     analysis_id: str | None = None
-    analysis: VideoAnalysisSummary | None = None
+    analysis: ContentAnalysisSummary | None = None
+    has_media_upload: bool = False
     has_video_upload: bool = False
     upload_filename: str | None = None
     metrics: VideoMetricsRead
     metrics_priority: str = "normal"
+
+    @property
+    def video_id(self) -> str:
+        return self.post_id
+
+
+VideoCatalogItem = ContentCatalogItem
 
 
 class VideoUploadRead(BaseModel):
@@ -554,7 +585,7 @@ class MetricsReadiness(BaseModel):
 class ContentAnalyticsPage(BaseModel):
     overview: AccountOverview
     readiness: MetricsReadiness
-    videos: list[VideoCatalogItem] = Field(default_factory=list)
+    videos: list[ContentCatalogItem] = Field(default_factory=list)
     required_field_labels: dict[str, str] = Field(default_factory=dict)
     optional_field_labels: dict[str, str] = Field(default_factory=dict)
 
@@ -565,6 +596,6 @@ class AnalyzeAllResponse(BaseModel):
     errors: list[dict] = Field(default_factory=list)
 
 
-from .content_analysis import VideoAnalysisSummary  # noqa: E402
+from .content_analysis import ContentAnalysisSummary  # noqa: E402
 
-VideoCatalogItem.model_rebuild()
+ContentCatalogItem.model_rebuild()

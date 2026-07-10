@@ -14,7 +14,7 @@ import type { ContentAnalyticsPage } from "@/types";
 export default function ContentAnalyticsPage() {
   const { configured } = useAnalyticsAccount();
   const [page, setPage] = useState<ContentAnalyticsPage | null>(null);
-  const [videoAnalysisProvider, setVideoAnalysisProvider] = useState<string | null>(null);
+  const [visualAnalysisProvider, setVisualAnalysisProvider] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState<string | null>(null);
@@ -22,7 +22,9 @@ export default function ContentAnalyticsPage() {
 
   useEffect(() => {
     void api.health().then((health) => {
-      setVideoAnalysisProvider(String(health.video_analysis_provider ?? "unknown"));
+      setVisualAnalysisProvider(
+        String(health.visual_analysis_provider ?? health.video_analysis_provider ?? "unknown"),
+      );
     });
   }, []);
 
@@ -81,7 +83,7 @@ export default function ContentAnalyticsPage() {
       <>
         <PageHeader
           title="Content Analytics"
-          description="Confirm TikTok Studio metrics, upload each video file, then run AI analysis."
+          description="Enter TikTok Studio metrics per post, upload media for full visual analysis, then run AI analysis."
         />
         <p className="text-muted-foreground">
           Connect your TikTok account above to manage video metrics.
@@ -94,7 +96,7 @@ export default function ContentAnalyticsPage() {
     <>
       <PageHeader
         title="Content Analytics"
-        description="Enter TikTok Studio metrics per video, upload the posted video for full visual analysis, then run AI analysis."
+        description="Enter TikTok Studio metrics per post, upload the posted media for full visual analysis, then run AI analysis."
         action={
           <Button onClick={analyzeAll} disabled={busy || !ready} size="sm">
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
@@ -108,13 +110,12 @@ export default function ContentAnalyticsPage() {
           {error}
         </div>
       ) : null}
-      {videoAnalysisProvider === "mock" ? (
+      {visualAnalysisProvider === "mock" ? (
         <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Visual analysis is running in demo mode (placeholder results). Set{" "}
           <code className="rounded bg-amber-100 px-1">GEMINI_API_KEY</code> and{" "}
-          <code className="rounded bg-amber-100 px-1">VIDEO_ANALYSIS_PROVIDER=gemini</code>{" "}
-          in the backend, then re-analyze uploaded videos for real on-screen text and scene
-          breakdown.
+          <code className="rounded bg-amber-100 px-1">VISUAL_ANALYSIS_PROVIDER=gemini</code>{" "}
+          in the backend, then re-analyze uploaded posts for real visual breakdown.
         </div>
       ) : null}
       {analyzeResult ? (
@@ -197,7 +198,7 @@ export default function ContentAnalyticsPage() {
           ) : null}
 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">Videos</h2>
+            <h2 className="text-lg font-semibold">Posts</h2>
             {sortedVideos.length > 0 ? (
               <Button
                 type="button"
@@ -222,8 +223,8 @@ export default function ContentAnalyticsPage() {
 
           {sortedVideos.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No videos to track yet. Mark content as Posted in the Content library, or wait
-              for TikTok video list to load when the data provider is available.
+              No posts to track yet. Mark content as Posted in the Content library, or wait
+              for TikTok content list to load when the data provider is available.
             </p>
           ) : (
             <div className="space-y-4">

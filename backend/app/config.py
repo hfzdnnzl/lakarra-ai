@@ -74,14 +74,21 @@ class Settings(BaseSettings):
     # --- Scheduler ---------------------------------------------------------
     scheduler_enabled: bool = False
 
-    # --- Video analysis (upload review) ------------------------------------
+    # --- Visual content analysis (upload review + analytics pass 2) ---------
     # ``auto`` picks gemini when GEMINI_API_KEY is set, else openai when OPENAI_API_KEY
     # is set, otherwise mock. Set explicitly to mock/gemini/openai to override.
-    video_analysis_provider: Literal["auto", "mock", "gemini", "openai"] = "auto"
-    video_analysis_model: str = "gemini-2.0-flash"
+    visual_analysis_provider: Literal["auto", "mock", "gemini", "openai"] = "auto"
+    visual_analysis_model: str = "gemini-2.0-flash"
     max_upload_bytes: int = 52_428_800  # 50 MB
     allowed_upload_mime_types: list[str] = Field(
-        default_factory=lambda: ["video/mp4", "video/quicktime", "video/webm"]
+        default_factory=lambda: [
+            "video/mp4",
+            "video/quicktime",
+            "video/webm",
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+        ]
     )
 
     # --- TikTok analytics (Content Analyst) --------------------------------
@@ -105,12 +112,14 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def effective_video_analysis_provider(settings: Settings | None = None) -> Literal["mock", "gemini", "openai"]:
-    """Resolve which video analysis backend to use."""
+def effective_visual_analysis_provider(
+    settings: Settings | None = None,
+) -> Literal["mock", "gemini", "openai"]:
+    """Resolve which visual analysis backend to use."""
 
     s = settings or get_settings()
-    if s.video_analysis_provider != "auto":
-        return s.video_analysis_provider
+    if s.visual_analysis_provider != "auto":
+        return s.visual_analysis_provider
     if s.gemini_api_key:
         return "gemini"
     if s.openai_api_key:
@@ -120,12 +129,13 @@ def effective_video_analysis_provider(settings: Settings | None = None) -> Liter
             return "openai"
     return "mock"
 
-def effective_video_analysis_model(settings: Settings | None = None) -> str:
-    """Pick a model name appropriate for the resolved video analysis provider."""
+
+def effective_visual_analysis_model(settings: Settings | None = None) -> str:
+    """Pick a model name appropriate for the resolved visual analysis provider."""
 
     s = settings or get_settings()
-    provider = effective_video_analysis_provider(s)
-    model = s.video_analysis_model
+    provider = effective_visual_analysis_provider(s)
+    model = s.visual_analysis_model
     if provider == "openai":
         if model.startswith(("gpt-", "o1", "o3", "o4")):
             return model
@@ -135,3 +145,8 @@ def effective_video_analysis_model(settings: Settings | None = None) -> str:
     if provider == "gemini":
         return "gemini-2.0-flash"
     return model
+
+
+# Legacy aliases
+effective_video_analysis_provider = effective_visual_analysis_provider
+effective_video_analysis_model = effective_visual_analysis_model

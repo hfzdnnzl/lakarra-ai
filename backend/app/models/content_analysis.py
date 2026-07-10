@@ -1,16 +1,18 @@
-"""Content Analysis domain model — unified video post-mortem output.
+"""Content Analysis domain model — unified VIDEO and IMAGE post-mortem output.
 
-Reusable primitives and sectioned analysis for Content Analyst and future agents
-(Strategy, Boardroom, Content Planner, Trend Analyst).
+Reusable primitives and sectioned analysis for Content Analyst and future agents.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
+
+from .content_types import ContentType
 
 
 def _coerce_str_list(value: Any) -> list[str]:
@@ -30,6 +32,18 @@ def _coerce_str_list(value: Any) -> list[str]:
         return items
     text = str(value).strip()
     return [text] if text else []
+
+
+@dataclass
+class MediaSource:
+    """Reference to analyzable media — bytes for uploads, URL for remote fetch."""
+
+    url: str | None = None
+    mime_type: str | None = None
+    bytes: bytes | None = None
+
+    def has_media(self) -> bool:
+        return bool(self.bytes) or bool(self.url)
 
 
 class Confidence(str, Enum):
@@ -60,6 +74,10 @@ class EvidenceSource(str, Enum):
     SCENE = "scene"
     SCRIPT = "script"
     METRICS = "metrics"
+    COMPOSITION = "composition"
+    TYPOGRAPHY = "typography"
+    BRANDING = "branding"
+    CTA = "cta"
 
 
 class Evidence(BaseModel):
@@ -133,12 +151,32 @@ class ExecutiveSummary(BaseModel):
     first_priority_action: str
 
 
-class ContentAnalysisSection(BaseModel):
+class VideoContentAnalysisSection(BaseModel):
+    type: Literal["VIDEO"] = "VIDEO"
     hook: RatedDimension
     story_script: RatedDimension
     voiceover: RatedDimension
     scenes: list[SceneAnalysis] = Field(default_factory=list)
     pacing: RatedDimension
+
+
+class ImageContentAnalysisSection(BaseModel):
+    type: Literal["IMAGE"] = "IMAGE"
+    composition: RatedDimension
+    typography: RatedDimension
+    visual_hierarchy: RatedDimension
+    branding: RatedDimension
+    message_clarity: RatedDimension
+    call_to_action: RatedDimension
+    visual_appeal: RatedDimension
+    color_harmony: RatedDimension
+    scroll_stopping_potential: RatedDimension
+
+
+ContentAnalysisSectionUnion = Annotated[
+    Union[VideoContentAnalysisSection, ImageContentAnalysisSection],
+    Field(discriminator="type"),
+]
 
 
 class AudienceAnalysisSection(BaseModel):
@@ -165,7 +203,7 @@ class AudienceAnalysisSection(BaseModel):
 
 
 class PerformanceAnalysisSection(BaseModel):
-    video: VideoInfo
+    post: PostInfo
     metrics: PerformanceMetrics
     engagement: EngagementMetrics
     performance_summary: str
@@ -183,25 +221,19 @@ class RecommendationsSection(BaseModel):
 
 class AnalysisMetadata(BaseModel):
     analysis_version: int = 1
+    content_type: ContentType = ContentType.VIDEO
     analysis_mode: Literal["full", "metrics_only"] = "metrics_only"
-    video_source: Literal["analytics_upload", "tiktok_download", "none"] = "none"
+    media_source: Literal["analytics_upload", "remote_download", "none"] = "none"
     linked_content_id: str | None = None
-    metrics_provider: str = ""
-    metrics_model: str = ""
-    metrics_prompt_version: str = ""
-    visual_provider: str | None = None
-    visual_model: str | None = None
-    visual_prompt_version: str | None = None
-    generated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC)
-    )
+    providers: dict[str, str] = Field(default_factory=dict)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ContentAnalysis(BaseModel):
-    """Unified post-mortem analysis of a published TikTok video."""
+    """Unified post-mortem analysis of published VIDEO or IMAGE content."""
 
     executive_summary: ExecutiveSummary
-    content_analysis: ContentAnalysisSection
+    content_analysis: ContentAnalysisSectionUnion
     audience_analysis: AudienceAnalysisSection
     performance_analysis: PerformanceAnalysisSection
     performance_diagnosis: PerformanceDiagnosisSection
@@ -218,7 +250,7 @@ class MetricsPassOutput(BaseModel):
     """Pass 1 LLM output — metrics and audience interpretation."""
 
     audience_analysis: AudienceAnalysisSection
-    content_analysis_partial: ContentAnalysisSection | None = None
+    content_analysis_partial: ContentAnalysisSectionUnion | None = None
     performance_diagnosis: PerformanceDiagnosisSection
     recommendations: RecommendationsSection
 
@@ -226,7 +258,7 @@ class MetricsPassOutput(BaseModel):
 class VisualPassOutput(BaseModel):
     """Pass 2 LLM output — visual content analysis."""
 
-    content_analysis: ContentAnalysisSection
+    content_analysis: ContentAnalysisSectionUnion
     performance_diagnosis: PerformanceDiagnosisSection = Field(
         default_factory=PerformanceDiagnosisSection
     )
@@ -248,7 +280,8 @@ class DimensionSummary(BaseModel):
     explanation: str
 
 
-class VideoAnalysisSummary(BaseModel):
+class ContentAnalysisSummary(BaseModel):
+    content_type: ContentType = ContentType.VIDEO
     executive_summary: ExecutiveSummary
     content_ratings: list[DimensionSummary] = Field(default_factory=list)
     scenes: list[SceneAnalysis] = Field(default_factory=list)
@@ -261,6 +294,25 @@ class VideoAnalysisSummary(BaseModel):
     visual_provider: str | None = None
 
 
-from .analytics import EngagementMetrics, PerformanceMetrics, VideoInfo  # noqa: E402
+# Backward-compatible alias for existing imports during transition.
+VideoAnalysisSummary = ContentAnalysisSummary
+ContentAnalysisSection = VideoContentAnalysisSection
+
+
+@dataclass
+class ContentAnalysisInput:
+    """Normalized input for the Content Analyst two-pass pipeline."""
+
+    content_type: ContentType
+    post_id: str
+    content_metadata: PostInfo
+    performance_data: PerformanceMetrics
+    comments: list[str] = field(default_factory=list)
+    historical_context: str = ""
+    linked_content_id: str | None = None
+    media_source: MediaSource | None = None
+
+
+from .analytics import EngagementMetrics, PerformanceMetrics, PostInfo  # noqa: E402
 
 PerformanceAnalysisSection.model_rebuild()

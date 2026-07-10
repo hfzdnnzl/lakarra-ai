@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
-from ...config import get_settings
+from ...config import effective_visual_analysis_model, effective_visual_analysis_provider, get_settings
 from ...errors import EmptyResponseError, OutputValidationError
 from ...models.content import ContentIdea, ContentRequest, FidelityReviewPayload
 from ...models.db import Content
@@ -160,8 +160,8 @@ class ContentCreatorAgent(BaseAgent):
         settings = get_settings()
         return ReviewResult(
             review=review,
-            model=settings.video_analysis_model,
-            provider=settings.video_analysis_provider,
+            model=effective_visual_analysis_model(),
+            provider=effective_visual_analysis_provider(),
             prompt_version=template.version,
         )
 

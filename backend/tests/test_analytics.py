@@ -40,8 +40,20 @@ class TestContentAnalystAgent:
         assert rec.posting_schedule == ["Post on Friday evenings and Saturday mornings."]
         assert rec.strategy_gaps == ["No trend-jacking content this week."]
 
-    def test_analyze_video(self, analyst: ContentAnalystAgent):
-        result = analyst.analyze_video("lk-001")
+    def test_analyze_content_metrics_pass(self, analyst: ContentAnalystAgent):
+        from app.models.content_analysis import ContentAnalysisInput, ContentType
+        from app.providers import MockTikTokProvider
+
+        post_data = MockTikTokProvider("lakarra").get_video("lk-001")
+        assert post_data is not None
+        input_data = ContentAnalysisInput(
+            content_type=ContentType.VIDEO,
+            post_id=post_data.video.post_id,
+            content_metadata=post_data.video,
+            performance_data=post_data.performance,
+            comments=post_data.comments,
+        )
+        result = analyst.analyze_content(input_data)
         assert "audience_analysis" in result.payload
         assert "performance_diagnosis" in result.payload
         assert "recommendations" in result.payload
@@ -63,8 +75,8 @@ class TestContentAnalystAgent:
         assert "patterns" in result.payload
         assert "recommendations" in result.payload
 
-    def test_analyze_all_videos(self, analyst: ContentAnalystAgent):
-        results = analyst.analyze_all_videos()
+    def test_analyze_all_posts(self, analyst: ContentAnalystAgent):
+        results = analyst.analyze_all_posts()
         assert len(results) == 5
 
 
@@ -132,13 +144,13 @@ class TestAnalyticsService:
         mock_storage = MagicMock()
         mock_storage.read_object.return_value = b"uploaded-video-bytes"
 
-        with patch("app.services.video_source.get_storage", return_value=mock_storage):
-            resp = analytics_service.analyze_video("lk-004", force=True)
+        with patch("app.services.media_resolver.get_storage", return_value=mock_storage):
+            resp = analytics_service.analyze_content("lk-004", force=True)
 
         assert resp.success is True
         assert resp.data is not None
         assert resp.data.get("metadata", {}).get("analysis_mode") == "full"
-        assert resp.data.get("metadata", {}).get("video_source") == "analytics_upload"
+        assert resp.data.get("metadata", {}).get("media_source") == "analytics_upload"
         assert len(resp.data.get("content_analysis", {}).get("scenes", [])) >= 1
 
     def test_upload_video_file(

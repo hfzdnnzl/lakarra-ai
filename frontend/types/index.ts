@@ -259,6 +259,8 @@ export interface ReviewRunResponse {
 
 // --- Analytics (Phase 3) -----------------------------------------------------
 
+export type ContentType = "VIDEO" | "IMAGE";
+
 export interface AccountOverview {
   tiktok_handle?: string | null;
   account_configured: boolean;
@@ -437,7 +439,8 @@ export interface RootCause {
   evidence: Evidence[];
 }
 
-export interface VideoAnalysisSummary {
+export interface ContentAnalysisSummary {
+  content_type: ContentType;
   executive_summary: ExecutiveSummary;
   content_ratings: DimensionSummary[];
   scenes: SceneAnalysis[];
@@ -450,8 +453,12 @@ export interface VideoAnalysisSummary {
   visual_provider?: string | null;
 }
 
-export interface VideoCatalogItem {
+/** @deprecated Use ContentAnalysisSummary */
+export type VideoAnalysisSummary = ContentAnalysisSummary;
+
+export interface ContentCatalogItem {
   video_id: string;
+  content_type: ContentType;
   title: string;
   url: string;
   caption: string;
@@ -462,12 +469,16 @@ export interface VideoCatalogItem {
   is_analyzed: boolean;
   analysis_version: number | null;
   analysis_id: string | null;
-  analysis?: VideoAnalysisSummary | null;
+  analysis?: ContentAnalysisSummary | null;
+  has_media_upload?: boolean;
   has_video_upload?: boolean;
   upload_filename?: string | null;
   metrics: VideoMetrics;
   metrics_priority: string;
 }
+
+/** @deprecated Use ContentCatalogItem */
+export type VideoCatalogItem = ContentCatalogItem;
 
 export interface MetricsReadiness {
   ready: boolean;

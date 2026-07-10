@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ...config import effective_video_analysis_provider, get_settings
+from ...config import effective_visual_analysis_provider, get_settings
 from ...services.ffmpeg_utils import ffmpeg_available
 
 router = APIRouter(tags=["system"])
@@ -19,6 +19,7 @@ def health() -> dict:
         "environment": settings.environment,
         "memory_backend": settings.memory_backend,
         "llm_provider": settings.llm_provider,
-        "video_analysis_provider": effective_video_analysis_provider(settings),
+        "visual_analysis_provider": effective_visual_analysis_provider(settings),
+        "video_analysis_provider": effective_visual_analysis_provider(settings),
         "video_analysis_ffmpeg_available": ffmpeg_available(),
     }

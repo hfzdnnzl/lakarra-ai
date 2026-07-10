@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from ..agents import get_agent_context
 from ..agents.content_analyst import ContentAnalystAgent
-from ..config import effective_video_analysis_model, effective_video_analysis_provider, get_settings
+from ..agents.content_analyst.input_builder import build_content_analysis_input
+from ..config import effective_visual_analysis_model, effective_visual_analysis_provider, get_settings
 from ..errors import (
     LakarraError,
     MetricsIncompleteError,
@@ -25,6 +26,7 @@ from ..models.analytics import (
     AnalyzeAllResponse,
     CompetitorOverview,
     ContentAnalyticsPage,
+    ContentCatalogItem,
     HistoricalAnalytics,
     MetricsReadiness,
     PerformanceMetrics,
@@ -39,6 +41,8 @@ from ..models.analytics import (
 )
 from ..models.content_analysis import (
     ContentAnalysis,
+    ContentType,
+    MediaSource,
     MetricsPassOutput,
     VisualPassOutput,
 )
@@ -51,22 +55,23 @@ from ..providers import (
 from ..providers.tiktok_live import LiveTikTokProvider
 from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
-from .analysis_merge import merge_passes, project_video_analysis_summary
-from .performance_analysis_builder import build_performance_analysis
-from .prompts import load_prompt
-from .storage_service import get_storage
-from .video_metrics import (
+from .analysis_merge import merge_passes, project_content_analysis_summary
+from .content_metrics import (
     METRIC_FIELD_LABELS,
     OPTIONAL_METRIC_FIELDS,
     REQUIRED_METRIC_FIELDS,
     apply_metrics_to_performance,
+    content_display_label,
     metrics_complete,
     metrics_from_row,
     missing_required,
     resolve_publish_metadata,
     video_display_label,
 )
-from .video_source import resolve_video_source
+from .media_resolver import resolve_media_source
+from .performance_analysis_builder import build_performance_analysis
+from .prompts import load_prompt
+from .storage_service import get_storage
 
 logger = logging.getLogger("lakarra.analytics_service")
 
@@ -423,7 +428,7 @@ class AnalyticsService:
 
     def _build_video_catalog(
         self, handle: str, account: TikTokAccountData
-    ) -> list[VideoCatalogItem]:
+    ) -> list[ContentCatalogItem]:
         analyses = self.repo.get_latest_analyses_map()
         sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
@@ -446,14 +451,15 @@ class AnalyticsService:
             analysis_summary = None
             if latest:
                 try:
-                    analysis_summary = project_video_analysis_summary(
+                    analysis_summary = project_content_analysis_summary(
                         ContentAnalysis.model_validate(payload)
                     )
                 except Exception:  # noqa: BLE001
                     analysis_summary = None
             catalog.append(
-                VideoCatalogItem(
-                    video_id=vid,
+                ContentCatalogItem(
+                    post_id=vid,
+                    content_type=getattr(video.video, "content_type", ContentType.VIDEO),
                     title=video_display_label(
                         title=video.video.title, caption=video.video.caption
                     ),
@@ -467,6 +473,7 @@ class AnalyticsService:
                     analysis_version=latest.version if latest else None,
                     analysis_id=latest.id if latest else None,
                     analysis=analysis_summary,
+                    has_media_upload=upload is not None,
                     has_video_upload=upload is not None,
                     upload_filename=upload.original_filename if upload else None,
                     metrics=self._metrics_read(vid, row, priority=priority),
@@ -674,35 +681,36 @@ class AnalyticsService:
             priority = "high" if video_id in priority_ids else "normal"
         return self._metrics_read(video_id, row, priority=priority)
 
-    def _apply_user_metrics_to_video(self, video: TikTokVideoData) -> TikTokVideoData:
-        row = self.repo.get_video_metrics(video.video.video_id)
+    def _apply_user_metrics_to_post(self, post: TikTokVideoData) -> TikTokVideoData:
+        row = self.repo.get_video_metrics(post.video.post_id)
         data = metrics_from_row(row)
         if not metrics_complete(data):
             raise MetricsIncompleteError(
-                f"Complete required metrics for video '{video.video.title}' before analyzing."
+                f"Complete required metrics for '{post.video.title}' before analyzing."
             )
-        perf_dict = video.performance.model_dump()
+        perf_dict = post.performance.model_dump()
         merged = apply_metrics_to_performance(perf_dict, data)
-        video.performance = type(video.performance)(**merged)
+        post.performance = type(post.performance)(**merged)
         if row is not None:
             if row.publish_date:
-                video.video.publish_date = row.publish_date
+                post.video.publish_date = row.publish_date
             if row.publish_time:
-                video.video.publish_time = row.publish_time
-        return video
+                post.video.publish_time = row.publish_time
+        return post
 
     # --- Analyze operations ------------------------------------------------
-    def analyze_video(
+    def analyze_content(
         self,
-        video_id: str,
+        post_id: str,
         *,
         content_id: str | None = None,
+        content_type: ContentType | None = None,
         force: bool = False,
     ) -> AnalysisResponse:
         try:
             handle = self._bind_tiktok_provider()
             if not force:
-                existing = self.repo.get_latest_analysis_for_video(video_id)
+                existing = self.repo.get_latest_analysis_for_video(post_id)
                 if existing is not None:
                     return AnalysisResponse(
                         success=True,
@@ -714,61 +722,84 @@ class AnalyticsService:
                     )
 
             provider = build_tiktok_provider(handle)
-            video_data = provider.get_video(video_id)
-            if video_data is None:
+            post_data = provider.get_video(post_id)
+            if post_data is None:
                 account, _ = self._fetch_account(handle)
                 if account is not None:
                     for candidate in account.videos:
-                        if candidate.video.video_id == video_id:
-                            video_data = candidate
+                        if candidate.video.post_id == post_id:
+                            post_data = candidate
                             break
-            if video_data is None:
-                raise NotFoundError(f"Video '{video_id}' not found.")
+            if post_data is None:
+                raise NotFoundError(f"Content '{post_id}' not found.")
 
-            self._sync_public_metrics(handle, video_data)
+            self._sync_public_metrics(handle, post_data)
             self.session.flush()
-            video_data = self._apply_user_metrics_to_video(video_data)
+            post_data = self._apply_user_metrics_to_post(post_data)
+
+            resolved_type = content_type or getattr(
+                post_data.video, "content_type", ContentType.VIDEO
+            )
+            media = resolve_media_source(
+                self.session,
+                post_id=post_id,
+                tiktok_handle=handle,
+                content_type=resolved_type,
+            )
+            if media.content_type:
+                resolved_type = media.content_type
 
             posted = self.content_repo.list_past_posts(exclude_id="", limit=10)
             historical = "\n".join(f"- {p.title} ({p.category})" for p in posted)
-            metrics_result = self._analyst._analyze_video_data(  # noqa: SLF001
-                video_data, historical_context=historical
+            analysis_input = build_content_analysis_input(
+                self.session,
+                post_data=post_data,
+                post_id=post_id,
+                linked_content_id=content_id,
+                content_type_override=resolved_type,
+                historical_context=historical,
+                resolved_media=media,
             )
+
+            metrics_result = self._analyst.analyze_content(analysis_input)
             metrics_pass = MetricsPassOutput(**metrics_result.payload)
 
-            metrics_row = self.repo.get_video_metrics(video_id)
+            metrics_row = self.repo.get_video_metrics(post_id)
             performance_section = build_performance_analysis(
-                video_data, metrics_row=metrics_row
+                post_data, metrics_row=metrics_row
             )
 
-            source = resolve_video_source(
-                self.session,
-                video_id=video_id,
-                tiktok_handle=handle,
-            )
             visual_pass: VisualPassOutput | None = None
             visual_provider: str | None = None
             visual_model: str | None = None
             visual_prompt_version: str | None = None
-            if source.bytes:
-                visual_provider = effective_video_analysis_provider()
-                visual_model = effective_video_analysis_model()
-                visual_pass = self._analyst.analyze_video_visual(
-                    video_bytes=source.bytes,
-                    mime_type=source.mime_type,
-                    video_data=video_data,
-                    content=None,
+            if media.bytes:
+                visual_provider = effective_visual_analysis_provider()
+                visual_model = effective_visual_analysis_model()
+                visual_pass = self._analyst.analyze_visual_content(
+                    analysis_input,
+                    MediaSource(
+                        bytes=media.bytes,
+                        mime_type=media.mime_type,
+                        url=media.download_url,
+                    ),
                 )
-                visual_prompt_version = load_prompt("content_analyst_video_visual").version
+                prompt_key = (
+                    "content_analyst/visual/image"
+                    if resolved_type == ContentType.IMAGE
+                    else "content_analyst/visual/video"
+                )
+                visual_prompt_version = load_prompt(prompt_key).version
 
-            version = self.repo.next_content_analysis_version(video_id)
+            version = self.repo.next_content_analysis_version(post_id)
             merged = merge_passes(
-                metrics_pass,
-                visual_pass,
-                performance_section,
+                content_type=resolved_type,
+                metrics=metrics_pass,
+                visual=visual_pass,
+                performance=performance_section,
                 analysis_version=version,
                 analysis_mode="full" if visual_pass else "metrics_only",
-                video_source=source.source,
+                media_source=media.source,
                 linked_content_id=content_id,
                 metrics_provider=metrics_result.provider,
                 metrics_model=metrics_result.model,
@@ -779,8 +810,8 @@ class AnalyticsService:
             )
             merged_payload = merged.model_dump(mode="json")
             row = self.repo.save_content_analysis(
-                video_id=video_id,
-                content_id=None,
+                video_id=post_id,
+                content_id=content_id,
                 version=version,
                 agent=self._analyst.name,
                 provider=metrics_result.provider,
@@ -797,13 +828,28 @@ class AnalyticsService:
                 version=version,
             )
         except LakarraError as exc:
-            logger.warning("analyze_video.failed type=%s", exc.error_type)
+            logger.warning("analyze_content.failed type=%s", exc.error_type)
             return AnalysisResponse(
                 success=False, error=exc.message, error_type=exc.error_type
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("analyze_video.unexpected")
+            logger.exception("analyze_content.unexpected")
             return AnalysisResponse(success=False, error=str(exc), error_type="error")
+
+    def analyze_video(
+        self,
+        video_id: str,
+        *,
+        content_id: str | None = None,
+        force: bool = False,
+    ) -> AnalysisResponse:
+        """Legacy delegate — analyzes by catalog post ID."""
+
+        return self.analyze_content(
+            video_id,
+            content_id=content_id,
+            force=force,
+        )
 
     def analyze_account(self) -> AnalysisResponse:
         try:

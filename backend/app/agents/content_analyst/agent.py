@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from ...config import effective_video_analysis_model, effective_video_analysis_provider, get_settings
+from ...config import effective_visual_analysis_model, effective_visual_analysis_provider, get_settings
 from ...errors import LakarraError, OutputValidationError
 from ...models.analytics import (
     CompetitorAnalysisPayload,
@@ -20,6 +20,9 @@ from ...models.analytics import (
     TrendReportPayload,
 )
 from ...models.content_analysis import (
+    ContentAnalysisInput,
+    ContentType,
+    MediaSource,
     MetricsPassOutput,
     VisualPassOutput,
 )
@@ -35,7 +38,11 @@ from ...providers import (
 )
 from ...services.json_utils import extract_json
 from ...services.prompts import load_prompt
-from ...services.video_analysis import build_video_analysis_service, parse_review_json
+from ...services.content_visual_analysis import (
+    VisualAnalysisContext,
+    build_content_visual_analysis_service,
+    parse_review_json,
+)
 from ..base import AgentRequest, AgentResult, BaseAgent
 from ..registry import register_agent
 
@@ -204,12 +211,15 @@ class ContentAnalystAgent(BaseAgent):
             },
             indent=2,
         )
-        analyzer = build_video_analysis_service()
-        raw = analyzer.analyze(
-            video_bytes=video_bytes,
-            mime_type=mime_type,
-            plan_json=plan_json,
-            review_prompt=review_prompt,
+        analyzer = build_content_visual_analysis_service()
+        raw = analyzer._provider.analyze(
+            content_type=ContentType.VIDEO,
+            media=MediaSource(bytes=video_bytes, mime_type=mime_type),
+            context=VisualAnalysisContext(
+                review_prompt=review_prompt,
+                plan_json=plan_json,
+                mode="performance",
+            ),
         )
         data = parse_review_json(raw)
         try:
@@ -219,32 +229,103 @@ class ContentAnalystAgent(BaseAgent):
                 f"Performance review failed validation: {exc.error_count()} error(s)."
             ) from exc
 
-        provider = effective_video_analysis_provider()
+        provider = effective_visual_analysis_provider()
         return AnalysisResult(
             review=review,
-            model=effective_video_analysis_model(),
+            model=effective_visual_analysis_model(),
             provider=provider,
             prompt_version=template.version,
         )
 
-    # --- Phase 3 analysis methods -----------------------------------------
-    def analyze_video(
+    # --- Unified content analysis (VIDEO + IMAGE) -------------------------
+    def _run_metrics_pass(self, input_data: ContentAnalysisInput) -> AgentAnalysisResult:
+        return self._run_prompt(
+            "content_analyst/metrics",
+            {
+                "content_type": input_data.content_type.value,
+                "post_data": json.dumps(input_data.content_metadata.model_dump(), indent=2),
+                "performance_data": json.dumps(
+                    input_data.performance_data.model_dump(), indent=2
+                ),
+                "comments": json.dumps(input_data.comments, indent=2),
+                "historical_context": input_data.historical_context or "(no historical context)",
+            },
+            MetricsPassOutput,
+        )
+
+    def analyze_visual_content(
         self,
-        video_id: str,
-        *,
-        content_id: str | None = None,
-        historical_context: str = "",
-    ) -> AgentAnalysisResult:
-        """Analyze a published Lakarra TikTok video."""
+        input_data: ContentAnalysisInput,
+        media: MediaSource,
+    ) -> VisualPassOutput:
+        """Multimodal visual review of published VIDEO or IMAGE content."""
 
-        video_data = self._tiktok_or_raise().get_video(video_id)
-        if video_data is None:
-            from ...errors import NotFoundError
+        if input_data.content_type == ContentType.IMAGE:
+            prompt_name = "content_analyst/visual/image"
+        else:
+            prompt_name = "content_analyst/visual/video"
 
-            raise NotFoundError(f"Video '{video_id}' not found.")
+        template = load_prompt(prompt_name)
+        plan_context = "(no CMS plan linked)"
+        if input_data.linked_content_id and self._internal:
+            content = self._internal.get_content(input_data.linked_content_id)
+            if content is not None:
+                plan_context = (
+                    f"Title: {content.title}\n"
+                    f"Category: {content.category}\n"
+                    f"Hook: {content.hook}\n"
+                    f"Caption: {content.caption}\n"
+                    f"CTA: {content.cta}"
+                )
+        performance_summary = json.dumps(
+            {
+                "views": input_data.performance_data.views,
+                "completion_rate": input_data.performance_data.completion_rate,
+                "average_watch_duration": input_data.performance_data.average_watch_duration,
+                "likes": input_data.performance_data.likes,
+                "comments": input_data.performance_data.comments,
+                "shares": input_data.performance_data.shares,
+                "saves": input_data.performance_data.saves,
+            },
+            indent=2,
+        )
+        variables: dict[str, str] = {
+            "plan_context": plan_context,
+            "performance_summary": performance_summary,
+        }
+        if input_data.content_type == ContentType.VIDEO:
+            variables["duration"] = str(input_data.content_metadata.duration)
 
-        return self._analyze_video_data(video_data, historical_context=historical_context)
+        user_prompt = template.render_user(variables)
+        review_prompt = f"{template.system}\n\n{user_prompt}"
+        plan_json = json.dumps(input_data.content_metadata.model_dump(), indent=2)
 
+        analyzer = build_content_visual_analysis_service()
+        raw = analyzer.analyze_visual(
+            content_type=input_data.content_type,
+            media=media,
+            context=VisualAnalysisContext(
+                review_prompt=review_prompt,
+                plan_json=plan_json,
+            ),
+        )
+        data = parse_review_json(raw)
+        try:
+            return VisualPassOutput(**data)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            location = ".".join(str(part) for part in first.get("loc", ()))
+            detail = first.get("msg", "invalid value")
+            raise OutputValidationError(
+                f"Visual analysis output failed validation at {location}: {detail}"
+            ) from exc
+
+    def analyze_content(self, input_data: ContentAnalysisInput) -> AgentAnalysisResult:
+        """Run Pass 1 metrics analysis for VIDEO or IMAGE content."""
+
+        return self._run_metrics_pass(input_data)
+
+    # --- Phase 3 analysis methods -----------------------------------------
     def analyze_account(self) -> AgentAnalysisResult:
         """Analyze historical Lakarra account performance and detect patterns."""
 
@@ -361,108 +442,46 @@ class ContentAnalystAgent(BaseAgent):
             TrendReportPayload,
         )
 
-    def _analyze_video_data(
-        self,
-        video_data: TikTokVideoData,
-        *,
-        historical_context: str = "",
-    ) -> AgentAnalysisResult:
-        return self._run_prompt(
-            "content_analyst_video",
-            {
-                "video_data": json.dumps(video_data.video.model_dump(), indent=2),
-                "performance_data": json.dumps(video_data.performance.model_dump(), indent=2),
-                "comments": json.dumps(video_data.comments, indent=2),
-                "historical_context": historical_context or "(no historical context)",
-            },
-            MetricsPassOutput,
-        )
+    def analyze_all_posts(self) -> list[AgentAnalysisResult]:
+        """Analyze every published post on the Lakarra account."""
 
-    def analyze_video_visual(
-        self,
-        *,
-        video_bytes: bytes,
-        mime_type: str,
-        video_data: TikTokVideoData,
-        content: Content | None = None,
-    ) -> VisualPassOutput:
-        """Multimodal visual review of a published video."""
+        results: list[AgentAnalysisResult] = []
+        for post_data in self._tiktok_or_raise().get_account().videos:
+            from .input_builder import build_content_analysis_input
 
-        template = load_prompt("content_analyst_video_visual")
-        plan_context = "(no CMS plan linked)"
-        if content is not None:
-            plan_context = (
-                f"Title: {content.title}\n"
-                f"Category: {content.category}\n"
-                f"Hook: {content.hook}\n"
-                f"Duration: {content.duration}s\n"
-                f"Caption: {content.caption}\n"
-                f"CTA: {content.cta}"
+            input_data = ContentAnalysisInput(
+                content_type=getattr(
+                    post_data.video, "content_type", ContentType.VIDEO
+                ),
+                post_id=post_data.video.post_id,
+                content_metadata=post_data.video,
+                performance_data=post_data.performance,
+                comments=list(post_data.comments),
+                historical_context="",
             )
-        performance_summary = json.dumps(
-            {
-                "views": video_data.performance.views,
-                "completion_rate": video_data.performance.completion_rate,
-                "average_watch_duration": video_data.performance.average_watch_duration,
-                "likes": video_data.performance.likes,
-                "comments": video_data.performance.comments,
-                "shares": video_data.performance.shares,
-                "saves": video_data.performance.saves,
-            },
-            indent=2,
-        )
-        user_prompt = template.render_user(
-            {
-                "duration": str(video_data.video.duration),
-                "plan_context": plan_context,
-                "performance_summary": performance_summary,
-            }
-        )
-        review_prompt = f"{template.system}\n\n{user_prompt}"
-        plan_json = json.dumps(
-            {
-                "video_id": video_data.video.video_id,
-                "title": video_data.video.title,
-                "caption": video_data.video.caption,
-                "duration": video_data.video.duration,
-                "content_category": video_data.video.content_category,
-            },
-            indent=2,
-        )
-        analyzer = build_video_analysis_service()
-        raw = analyzer.analyze(
-            video_bytes=video_bytes,
-            mime_type=mime_type,
-            plan_json=plan_json,
-            review_prompt=review_prompt,
-        )
-        data = parse_review_json(raw)
-        try:
-            return VisualPassOutput(**data)
-        except ValidationError as exc:
-            first = exc.errors()[0]
-            location = ".".join(str(part) for part in first.get("loc", ()))
-            detail = first.get("msg", "invalid value")
-            raise OutputValidationError(
-                f"Visual analysis output failed validation at {location}: {detail}"
-            ) from exc
-
-    def analyze_all_videos(self) -> list[AgentAnalysisResult]:
-        """Analyze every published video on the Lakarra account."""
-
-        return [
-            self._analyze_video_data(v)
-            for v in self._tiktok_or_raise().get_account().videos
-        ]
+            results.append(self._run_metrics_pass(input_data))
+        return results
 
     # --- Workflow entry point -----------------------------------------------
     def handle(self, request: AgentRequest) -> AgentResult:
         action = request.payload.get("action", "account")
 
         try:
+            from ...errors import NotFoundError
+
             if action == "video":
                 video_id = request.payload.get("video_id", "lk-001")
-                result = self.analyze_video(video_id)
+                post_data = self._tiktok_or_raise().get_video(video_id)
+                if post_data is None:
+                    raise NotFoundError(f"Post '{video_id}' not found.")
+                input_data = ContentAnalysisInput(
+                    content_type=getattr(post_data.video, "content_type", ContentType.VIDEO),
+                    post_id=post_data.video.post_id,
+                    content_metadata=post_data.video,
+                    performance_data=post_data.performance,
+                    comments=list(post_data.comments),
+                )
+                result = self.analyze_content(input_data)
                 output = {"action": "video", "video_id": video_id, "analysis": result.payload}
             elif action == "competitor":
                 handle = request.payload.get("handle", "paperlesspost")

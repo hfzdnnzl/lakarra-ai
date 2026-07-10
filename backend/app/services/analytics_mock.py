@@ -18,9 +18,9 @@ from ..models.content_analysis import (
     AudienceAnalysisSection,
     CategoricalRating,
     Confidence,
-    ContentAnalysisSection,
     Evidence,
     EvidenceSource,
+    ImageContentAnalysisSection,
     Impact,
     MetricsPassOutput,
     PerformanceDiagnosisSection,
@@ -29,6 +29,7 @@ from ..models.content_analysis import (
     RecommendationsSection,
     RootCause,
     SceneAnalysis,
+    VideoContentAnalysisSection,
     VisualPassOutput,
 )
 from ..providers import TikTokVideoData
@@ -91,7 +92,7 @@ def build_video_analysis_response(
                 "Comments ask pricing questions — purchase consideration present",
             ],
         ),
-        content_analysis_partial=ContentAnalysisSection(
+        content_analysis_partial=VideoContentAnalysisSection(
             hook=_dimension(
                 CategoricalRating.GOOD if p.completion_rate > 0.35 else CategoricalRating.WEAK,
                 7 if p.completion_rate > 0.35 else 4,
@@ -195,7 +196,7 @@ def build_visual_pass_response() -> str:
         evidence=[_evidence(EvidenceSource.SCENE, "0:08 — Static product shot holds too long")],
     )
     payload = VisualPassOutput(
-        content_analysis=ContentAnalysisSection(
+        content_analysis=VideoContentAnalysisSection(
             hook=RatedDimension(
                 rating=CategoricalRating.GOOD,
                 score=8,
@@ -303,6 +304,156 @@ def build_visual_pass_response() -> str:
                             "0:00 — Strong product visual could serve as payoff tease",
                         )
                     ],
+                ),
+            ],
+        ),
+    )
+    return json.dumps(payload.model_dump(mode="json"), indent=2)
+
+
+def build_image_visual_pass_response() -> str:
+    """Mock Pass 2 image visual analysis output."""
+
+    dim = lambda rating, score, explanation: RatedDimension(  # noqa: E731
+        rating=rating,
+        score=score,
+        confidence=Confidence.HIGH,
+        explanation=explanation,
+        strengths=[explanation],
+        weaknesses=[],
+        recommendations=[],
+    )
+    payload = VisualPassOutput(
+        content_analysis=ImageContentAnalysisSection(
+            composition=dim(
+                CategoricalRating.GOOD,
+                8,
+                "Strong focal point with invitation preview centered in frame",
+            ),
+            typography=dim(
+                CategoricalRating.AVERAGE,
+                6,
+                "Headline readable but secondary text competes for attention",
+            ),
+            visual_hierarchy=dim(
+                CategoricalRating.GOOD,
+                7,
+                "Clear top-to-bottom flow from hook to CTA",
+            ),
+            branding=dim(
+                CategoricalRating.EXCELLENT,
+                9,
+                "Consistent Lakarra palette and logo placement",
+            ),
+            message_clarity=dim(
+                CategoricalRating.GOOD,
+                8,
+                "Value proposition visible within first glance",
+            ),
+            call_to_action=dim(
+                CategoricalRating.WEAK,
+                4,
+                "CTA text is small and low contrast against background",
+            ),
+            visual_appeal=dim(
+                CategoricalRating.GOOD,
+                7,
+                "Elegant wedding aesthetic with premium feel",
+            ),
+            color_harmony=dim(
+                CategoricalRating.EXCELLENT,
+                9,
+                "Cohesive blush and gold palette",
+            ),
+            scroll_stopping_potential=dim(
+                CategoricalRating.GOOD,
+                8,
+                "Bold headline and product mockup create scroll-stop",
+            ),
+        ),
+        performance_diagnosis=PerformanceDiagnosisSection(
+            root_causes=[
+                RootCause(
+                    factor="Low-contrast CTA",
+                    estimated_impact=Impact.HIGH,
+                    confidence=Confidence.HIGH,
+                    explanation="CTA blends into background reducing click intent",
+                    evidence=[
+                        _evidence(EvidenceSource.CTA, "Bottom-right CTA text lacks contrast"),
+                    ],
+                ),
+            ]
+        ),
+        recommendations=RecommendationsSection(
+            immediate_improvements=[
+                _rec(
+                    "Increase CTA button contrast and size",
+                    EvidenceSource.CTA,
+                    "CTA is hard to spot on mobile feed",
+                ),
+            ],
+        ),
+    )
+    return json.dumps(payload.model_dump(mode="json"), indent=2)
+
+
+def build_image_metrics_response(video_data: TikTokVideoData) -> str:
+    """Mock Pass 1 metrics output for IMAGE posts."""
+
+    v = video_data.video
+    p = video_data.performance
+    views = max(p.views, 1)
+    save_rate = round(p.saves / views, 4)
+    dim = _dimension(
+        CategoricalRating.GOOD,
+        7,
+        Confidence.LOW,
+        "Inferred from engagement — visual confirmation unavailable in metrics-only pass",
+    )
+    payload = MetricsPassOutput(
+        audience_analysis=AudienceAnalysisSection(
+            retention_summary=(
+                f"Image post reached {p.views:,} views with "
+                f"{round((p.likes + p.comments + p.shares + p.saves) / views, 3):.1%} engagement."
+            ),
+            comment_sentiment="positive",
+            repeated_questions=["How do I customize this design?"],
+            purchase_intent="moderate",
+            audience_observations=[f"Save rate {save_rate:.1%} suggests strong bookmark intent"],
+        ),
+        content_analysis_partial=ImageContentAnalysisSection(
+            composition=dim,
+            typography=dim,
+            visual_hierarchy=dim,
+            branding=dim,
+            message_clarity=dim,
+            call_to_action=dim,
+            visual_appeal=dim,
+            color_harmony=dim,
+            scroll_stopping_potential=dim,
+        ),
+        performance_diagnosis=PerformanceDiagnosisSection(
+            root_causes=[
+                RootCause(
+                    factor="Strong save intent",
+                    estimated_impact=Impact.MEDIUM,
+                    confidence=Confidence.HIGH,
+                    explanation=f"Save rate {save_rate:.1%} indicates revisit intent",
+                    evidence=[
+                        _evidence(
+                            EvidenceSource.METRICS,
+                            f"{p.saves:,} saves on {p.views:,} views",
+                        ),
+                    ],
+                ),
+            ]
+        ),
+        recommendations=RecommendationsSection(
+            immediate_improvements=[
+                _rec(
+                    "Test a bolder headline on the next image post",
+                    EvidenceSource.METRICS,
+                    f"Engagement rate suggests audience responds to visual hooks",
                 ),
             ],
         ),
@@ -423,7 +574,7 @@ def build_trend_report_response(period: str, patterns: PatternAnalysisPayload) -
 def detect_analyst_prompt_type(system_text: str) -> str | None:
     lower = system_text.lower()
     if "metricspassoutput" in lower or "pass 1 metrics" in lower:
-        return "video"
+        return "metrics"
     if "historical account performance" in lower:
         return "account"
     if "competitor tiktok accounts" in lower:
@@ -442,15 +593,20 @@ def build_analyst_mock_response(system_text: str, user_text: str) -> str | None:
     if prompt_type is None:
         return None
 
-    if prompt_type == "video":
-        video_id_match = re.search(r'"video_id":\s*"([^"]+)"', user_text)
+    if prompt_type == "metrics":
+        is_image = "IMAGE" in user_text
+        post_id_match = re.search(r'"(?:post_id|video_id)":\s*"([^"]+)"', user_text)
+        from ..models.content_analysis import ContentType
         from ..providers import MockTikTokProvider
 
         provider = MockTikTokProvider("lakarra")
-        vid = video_id_match.group(1) if video_id_match else "lk-001"
-        data = provider.get_video(vid)
+        post_id = post_id_match.group(1) if post_id_match else "lk-001"
+        data = provider.get_video(post_id)
         if data is None:
             data = provider.get_account().videos[0]
+        if is_image:
+            data.video.content_type = ContentType.IMAGE
+            return build_image_metrics_response(data)
         return build_video_analysis_response(data)
 
     if prompt_type == "account":

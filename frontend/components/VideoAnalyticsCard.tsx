@@ -31,10 +31,10 @@ import {
 } from "@/lib/metric-format";
 import { videoDisplayLabel } from "@/lib/video-label";
 import { cn } from "@/lib/utils";
-import type { VideoCatalogItem, VideoMetrics } from "@/types";
+import type { ContentCatalogItem, VideoMetrics } from "@/types";
 
 type Props = {
-  video: VideoCatalogItem;
+  video: ContentCatalogItem;
   requiredLabels: Record<string, string>;
   optionalLabels: Record<string, string>;
   onUpdated: () => void;
@@ -90,6 +90,8 @@ export function VideoAnalyticsCard({
 }: Props) {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const label = videoDisplayLabel(video);
+  const isImage = video.content_type === "IMAGE";
+  const hasUpload = video.has_media_upload ?? video.has_video_upload ?? false;
   const [expanded, setExpanded] = useState(expandAll ?? false);
   const [editing, setEditing] = useState(() => !hasSavedMetrics(video.metrics));
   const [form, setForm] = useState(() => cloneMetrics(video.metrics));
@@ -325,8 +327,11 @@ export function VideoAnalyticsCard({
                   <Badge variant="muted">Metrics only</Badge>
                 )
               ) : null}
-              {video.has_video_upload ? (
-                <Badge variant="outline">Video uploaded</Badge>
+              {hasUpload ? (
+                <Badge variant="outline">{isImage ? "Image uploaded" : "Video uploaded"}</Badge>
+              ) : null}
+              {video.content_type === "IMAGE" ? (
+                <Badge variant="outline">Image post</Badge>
               ) : null}
               {video.analysis?.analysis_mode === "full" && video.analysis.visual_provider === "mock" ? (
                 <Badge variant="warning">Demo visual analysis</Badge>
@@ -515,14 +520,20 @@ export function VideoAnalyticsCard({
           ) : null}
 
           <div className="space-y-2 rounded-md border p-3">
-            <div className="font-medium">Video for analysis</div>
+            <div className="font-medium">{isImage ? "Image for analysis" : "Video for analysis"}</div>
             <p className="text-xs text-muted-foreground">
-              Upload the posted TikTok video here for full visual analysis.
+              {isImage
+                ? "Upload the posted TikTok image here for full visual analysis."
+                : "Upload the posted TikTok video here for full visual analysis."}
             </p>
             <input
               ref={uploadInputRef}
               type="file"
-              accept="video/mp4,video/quicktime,video/webm"
+              accept={
+                isImage
+                  ? "image/jpeg,image/png,image/webp"
+                  : "video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp"
+              }
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -530,7 +541,7 @@ export function VideoAnalyticsCard({
                 e.target.value = "";
               }}
             />
-            {video.has_video_upload && video.upload_filename ? (
+            {hasUpload && video.upload_filename ? (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="truncate text-sm">{video.upload_filename}</span>
                 <Button
@@ -575,9 +586,13 @@ export function VideoAnalyticsCard({
                   ) : (
                     <Upload className="mr-2 h-4 w-4" />
                   )}
-                  Upload video for analysis
+                  Upload {isImage ? "image" : "video"} for analysis
                 </Button>
-                <p className="text-xs text-muted-foreground">MP4, MOV, or WebM up to 50 MB.</p>
+                <p className="text-xs text-muted-foreground">
+                  {isImage
+                    ? "JPEG, PNG, or WebP up to 50 MB."
+                    : "MP4, MOV, WebM, or image formats up to 50 MB."}
+                </p>
               </div>
             )}
           </div>
@@ -712,10 +727,11 @@ export function VideoAnalyticsCard({
         </CardContent>
       ) : null}
 
-      {previewOpen && video.has_video_upload ? (
+      {previewOpen && hasUpload ? (
         <VideoPreviewOverlay
           src={api.analyticsVideoStreamUrl(video.video_id)}
           title={video.upload_filename ?? label}
+          kind={isImage ? "image" : "video"}
           onClose={() => setPreviewOpen(false)}
         />
       ) : null}

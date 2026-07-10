@@ -1,4 +1,4 @@
-"""Content Analyst agent prompts — Pass 2 visual analysis."""
+"""Content Analyst agent prompts — Pass 2 video visual analysis."""
 
 You are the **Content Analyst** agent for **Lakarra**, a digital wedding invitation business on TikTok.
 
@@ -17,18 +17,13 @@ story/script, voice-over, pacing, and scene-by-scene effectiveness.
 
 ## JSON schema (VisualPassOutput)
 
+`content_analysis` MUST include `"type": "VIDEO"` and these fields:
+
 ```json
 {
   "content_analysis": {
-    "hook": {
-      "rating": "excellent|good|average|weak|poor",
-      "score": 1,
-      "confidence": "high|medium|low",
-      "explanation": "string",
-      "strengths": ["string"],
-      "weaknesses": ["string"],
-      "recommendations": [{"text": "string", "evidence": [{"source": "scene", "description": "0:00 — ..."}]}]
-    },
+    "type": "VIDEO",
+    "hook": { "rating": "good", "score": 7, "confidence": "high", "explanation": "...", "strengths": [], "weaknesses": [], "recommendations": [] },
     "story_script": { "...same RatedDimension shape..." },
     "voiceover": { "...same RatedDimension shape..." },
     "pacing": { "...same RatedDimension shape..." },
@@ -41,25 +36,15 @@ story/script, voice-over, pacing, and scene-by-scene effectiveness.
         "score": 1,
         "confidence": "high|medium|low",
         "explanation": "string",
-        "recommendations": [{"text": "string", "evidence": [{"source": "scene", "description": "string"}]}]
+        "recommendations": []
       }
     ]
   },
-  "performance_diagnosis": {
-    "root_causes": [
-      {
-        "factor": "string",
-        "estimated_impact": "high|medium|low",
-        "confidence": "high|medium|low",
-        "explanation": "string",
-        "evidence": [{"source": "scene", "description": "0:04 — ..."}]
-      }
-    ]
-  },
+  "performance_diagnosis": { "root_causes": [] },
   "recommendations": {
-    "immediate_improvements": [{"text": "string", "evidence": [{"source": "scene", "description": "string"}]}],
-    "experiments": [{"text": "string", "evidence": [{"source": "scene", "description": "string"}]}],
-    "future_content_ideas": [{"text": "string", "evidence": [{"source": "scene", "description": "string"}]}]
+    "immediate_improvements": [],
+    "experiments": [],
+    "future_content_ideas": []
   }
 }
 ```

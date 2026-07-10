@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from app.models.analytics import EngagementMetrics, PerformanceMetrics, VideoInfo
+from app.models.analytics import EngagementMetrics, PerformanceMetrics, PostInfo
 from app.models.content_analysis import (
     AudienceAnalysisSection,
     CategoricalRating,
     Confidence,
-    ContentAnalysisSection,
+    ContentType,
     Evidence,
     EvidenceSource,
+    ImageContentAnalysisSection,
     Impact,
     MetricsPassOutput,
     PerformanceAnalysisSection,
@@ -19,9 +20,10 @@ from app.models.content_analysis import (
     RecommendationsSection,
     RootCause,
     SceneAnalysis,
+    VideoContentAnalysisSection,
     VisualPassOutput,
 )
-from app.services.analysis_merge import merge_passes, project_video_analysis_summary
+from app.services.analysis_merge import merge_passes, project_content_analysis_summary
 
 
 def _dimension(score: int = 5) -> RatedDimension:
@@ -40,7 +42,7 @@ def _metrics_pass() -> MetricsPassOutput:
             drop_off_points=["Mid-video"],
             comment_sentiment="positive",
         ),
-        content_analysis_partial=ContentAnalysisSection(
+        content_analysis_partial=VideoContentAnalysisSection(
             hook=_dimension(4),
             story_script=_dimension(5),
             voiceover=_dimension(5),
@@ -80,7 +82,7 @@ def _metrics_pass() -> MetricsPassOutput:
 
 def _visual_pass() -> VisualPassOutput:
     return VisualPassOutput(
-        content_analysis=ContentAnalysisSection(
+        content_analysis=VideoContentAnalysisSection(
             hook=RatedDimension(
                 rating=CategoricalRating.GOOD,
                 score=8,
@@ -134,9 +136,25 @@ def _visual_pass() -> VisualPassOutput:
     )
 
 
+def _image_visual_pass() -> VisualPassOutput:
+    return VisualPassOutput(
+        content_analysis=ImageContentAnalysisSection(
+            composition=_dimension(8),
+            typography=_dimension(6),
+            visual_hierarchy=_dimension(7),
+            branding=_dimension(9),
+            message_clarity=_dimension(8),
+            call_to_action=_dimension(4),
+            visual_appeal=_dimension(7),
+            color_harmony=_dimension(9),
+            scroll_stopping_potential=_dimension(8),
+        ),
+    )
+
+
 def _performance() -> PerformanceAnalysisSection:
     return PerformanceAnalysisSection(
-        video=VideoInfo(video_id="lk-001", title="Test"),
+        post=PostInfo(post_id="lk-001", title="Test"),
         metrics=PerformanceMetrics(views=1000, likes=50, comments=10, shares=5, saves=20),
         engagement=EngagementMetrics(engagement_rate=0.085),
         performance_summary="1000 views, 8.5% engagement.",
@@ -146,31 +164,33 @@ def _performance() -> PerformanceAnalysisSection:
 class TestMergePasses:
     def test_metrics_only_produces_unified_analysis(self):
         merged = merge_passes(
-            _metrics_pass(),
-            None,
-            _performance(),
+            content_type=ContentType.VIDEO,
+            metrics=_metrics_pass(),
+            visual=None,
+            performance=_performance(),
             analysis_version=1,
             analysis_mode="metrics_only",
-            video_source="none",
+            media_source="none",
             linked_content_id=None,
             metrics_provider="mock",
             metrics_model="mock",
             metrics_prompt_version="abc",
         )
         assert merged.metadata.analysis_mode == "metrics_only"
+        assert merged.metadata.content_type == ContentType.VIDEO
         assert merged.executive_summary.overall_verdict
         assert merged.content_analysis.hook.score == 4
-        assert "visual_review" not in merged.model_dump()
         assert len(merged.performance_diagnosis.root_causes) == 1
 
     def test_full_mode_visual_overrides_content_ratings(self):
         merged = merge_passes(
-            _metrics_pass(),
-            _visual_pass(),
-            _performance(),
+            content_type=ContentType.VIDEO,
+            metrics=_metrics_pass(),
+            visual=_visual_pass(),
+            performance=_performance(),
             analysis_version=1,
             analysis_mode="full",
-            video_source="analytics_upload",
+            media_source="analytics_upload",
             linked_content_id=None,
             metrics_provider="mock",
             metrics_model="mock",
@@ -185,14 +205,33 @@ class TestMergePasses:
         assert len(merged.performance_diagnosis.root_causes) == 2
         assert merged.recommendations.experiments
 
-    def test_executive_summary_synthesized(self):
+    def test_image_merge(self):
         merged = merge_passes(
-            _metrics_pass(),
-            _visual_pass(),
-            _performance(),
+            content_type=ContentType.IMAGE,
+            metrics=_metrics_pass(),
+            visual=_image_visual_pass(),
+            performance=_performance(),
             analysis_version=1,
             analysis_mode="full",
-            video_source="analytics_upload",
+            media_source="analytics_upload",
+            linked_content_id=None,
+            metrics_provider="mock",
+            metrics_model="mock",
+            metrics_prompt_version="abc",
+            visual_provider="mock",
+        )
+        assert merged.metadata.content_type == ContentType.IMAGE
+        assert merged.content_analysis.composition.score == 8
+
+    def test_executive_summary_synthesized(self):
+        merged = merge_passes(
+            content_type=ContentType.VIDEO,
+            metrics=_metrics_pass(),
+            visual=_visual_pass(),
+            performance=_performance(),
+            analysis_version=1,
+            analysis_mode="full",
+            media_source="analytics_upload",
             linked_content_id=None,
             metrics_provider="mock",
             metrics_model="mock",
@@ -203,21 +242,23 @@ class TestMergePasses:
         assert merged.executive_summary.biggest_strength
         assert merged.executive_summary.biggest_weakness
 
-    def test_project_video_analysis_summary(self):
+    def test_project_content_analysis_summary(self):
         merged = merge_passes(
-            _metrics_pass(),
-            _visual_pass(),
-            _performance(),
+            content_type=ContentType.VIDEO,
+            metrics=_metrics_pass(),
+            visual=_visual_pass(),
+            performance=_performance(),
             analysis_version=1,
             analysis_mode="full",
-            video_source="analytics_upload",
+            media_source="analytics_upload",
             linked_content_id=None,
             metrics_provider="mock",
             metrics_model="mock",
             metrics_prompt_version="abc",
             visual_provider="mock",
         )
-        summary = project_video_analysis_summary(merged)
+        summary = project_content_analysis_summary(merged)
         assert summary.analysis_mode == "full"
+        assert summary.content_type == ContentType.VIDEO
         assert len(summary.content_ratings) == 4
         assert len(summary.top_root_causes) <= 3

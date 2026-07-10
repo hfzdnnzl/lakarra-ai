@@ -155,6 +155,20 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  analyzeContent: (
+    post_id: string,
+    options?: { contentId?: string; contentType?: "VIDEO" | "IMAGE"; force?: boolean },
+  ) =>
+    request<import("@/types").AnalysisResponse>(
+      `/analytics/content/${post_id}/analyze?force=${options?.force ?? false}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          content_id: options?.contentId,
+          content_type: options?.contentType,
+        }),
+      },
+    ),
   analyzeVideoById: (video_id: string, force = false) =>
     request<import("@/types").AnalysisResponse>(
       `/analytics/videos/${video_id}/analyze?force=${force}`,

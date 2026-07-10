@@ -22,9 +22,11 @@ from ..errors import TikTokFetchError
 from ..models.analytics import (
     CompetitorAccountData,
     PerformanceMetrics,
+    PostInfo,
     VideoInfo,
     normalize_tiktok_handle,
 )
+from ..models.content_types import ContentType
 
 logger = logging.getLogger("lakarra.tiktok_live")
 
@@ -277,6 +279,51 @@ def download_tiktok_video(handle: str, video_id: str) -> tuple[bytes, str, str] 
     return data, mime_type, download_url
 
 
+def download_tiktok_image(handle: str, post_id: str) -> tuple[bytes, str, str] | None:
+    """Download TikTok image post bytes via cover/thumbnail URL."""
+
+    normalized = normalize_tiktok_handle(handle)
+    if not normalized or not post_id:
+        return None
+
+    page_url = f"https://www.tiktok.com/@{normalized}/photo/{post_id}"
+    with _client() as client:
+        try:
+            data = _post_json(client, "/api/", data={"url": page_url, "hd": 1})
+        except TikTokFetchError:
+            data = None
+        if not data:
+            page_url = f"https://www.tiktok.com/@{normalized}/video/{post_id}"
+            data = _post_json(client, "/api/", data={"url": page_url, "hd": 1})
+
+    image_url = data.get("cover") or data.get("origin_cover") or data.get("dynamic_cover")
+    if not image_url:
+        return None
+
+    max_bytes = get_settings().max_upload_bytes
+    timeout = get_settings().tiktok_fetch_timeout_seconds
+    with _client() as client:
+        response = client.get(image_url, timeout=timeout)
+        if response.status_code != 200:
+            return None
+        raw = response.content
+        if len(raw) > max_bytes:
+            raise TikTokFetchError(f"TikTok image exceeds max size ({max_bytes} bytes).")
+
+    content_type = response.headers.get("content-type", "image/jpeg")
+    mime_type = content_type.split(";")[0].strip() or "image/jpeg"
+    return raw, mime_type, image_url
+
+
+def _detect_content_type(raw: dict) -> ContentType:
+    if raw.get("images") or raw.get("image_post"):
+        return ContentType.IMAGE
+    duration = int(raw.get("duration") or 0)
+    if duration == 0 and not _download_url_from_raw(raw):
+        return ContentType.IMAGE
+    return ContentType.VIDEO
+
+
 def _caption_from_video(raw: dict) -> str:
     desc = raw.get("desc") or raw.get("title") or ""
     if desc:
@@ -307,8 +354,10 @@ def _video_from_raw(handle: str, raw: dict) -> TikTokVideoData:
     saves = int(raw.get("collect_count") or 0)
     duration = int(raw.get("duration") or 0)
 
-    video = VideoInfo(
-        video_id=video_id,
+    content_type = _detect_content_type(raw)
+    video = PostInfo(
+        post_id=video_id,
+        content_type=content_type,
         url=f"https://www.tiktok.com/@{handle}/video/{video_id}",
         title=caption[:120] if caption else f"Video {video_id}",
         caption=caption,

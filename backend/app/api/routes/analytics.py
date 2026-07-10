@@ -17,6 +17,7 @@ from ...models.analytics import (
     AnalysisResponse,
     AnalyzeAllResponse,
     AnalyzeCompetitorRequest,
+    AnalyzeContentRequest,
     AnalyzeVideoRequest,
     CompetitorOverview,
     ContentAnalyticsPage,
@@ -75,8 +76,31 @@ def analyze_video(
     force: bool = False,
     service: AnalyticsService = Depends(_service),
 ) -> AnalysisResponse:
-    result = service.analyze_video(body.video_id, force=force)
+    result = service.analyze_content(
+        body.video_id,
+        content_id=body.content_id,
+        force=force,
+    )
     if not result.success:
+        raise HTTPException(status_for(result.error_type), detail=result.error)
+    return result
+
+
+@router.post("/content/{post_id}/analyze", response_model=AnalysisResponse)
+def analyze_content(
+    post_id: str,
+    body: AnalyzeContentRequest | None = None,
+    force: bool = False,
+    service: AnalyticsService = Depends(_service),
+) -> AnalysisResponse:
+    req = body or AnalyzeContentRequest()
+    result = service.analyze_content(
+        post_id,
+        content_id=req.content_id,
+        content_type=req.content_type,
+        force=force,
+    )
+    if not result.success and not result.skipped:
         raise HTTPException(status_for(result.error_type), detail=result.error)
     return result
 
@@ -87,8 +111,8 @@ def analyze_video_by_id(
     force: bool = False,
     service: AnalyticsService = Depends(_service),
 ) -> AnalysisResponse:
-    result = service.analyze_video(video_id, force=force)
-    if not result.success:
+    result = service.analyze_content(video_id, force=force)
+    if not result.success and not result.skipped:
         raise HTTPException(status_for(result.error_type), detail=result.error)
     return result
 
