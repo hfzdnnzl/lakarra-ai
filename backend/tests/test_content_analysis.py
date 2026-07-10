@@ -61,6 +61,50 @@ class TestContentAnalysisFlows:
         assert section.scenes[0].end_timestamp == "3"
         assert section.scenes[0].purpose == "Opening hook"
 
+    def test_video_recommendation_alias_maps_to_text(self):
+        from app.models.content_analysis import VideoContentAnalysisSection
+
+        section = VideoContentAnalysisSection(
+            type="VIDEO",
+            hook={
+                "rating": "good",
+                "score": 8,
+                "confidence": "medium",
+                "explanation": "Hook lands in the first second.",
+                "recommendations": [
+                    {
+                        "recommendation": "Open with a stronger movement cue.",
+                        "evidence": [
+                            {
+                                "source": "retention",
+                                "description": "3-second hold dips after frame one.",
+                            }
+                        ],
+                    }
+                ],
+            },
+            story_script={
+                "rating": "good",
+                "score": 7,
+                "confidence": "medium",
+                "explanation": "Structure is clear.",
+            },
+            voiceover={
+                "rating": "average",
+                "score": 6,
+                "confidence": "low",
+                "explanation": "Voice pacing varies.",
+            },
+            pacing={
+                "rating": "average",
+                "score": 6,
+                "confidence": "low",
+                "explanation": "Middle section drags.",
+            },
+        )
+
+        assert section.hook.recommendations[0].text == "Open with a stronger movement cue."
+
     def test_video_metrics_only(self, analytics_service: AnalyticsService):
         resp = analytics_service.analyze_content("lk-001", force=True)
         assert resp.success is True

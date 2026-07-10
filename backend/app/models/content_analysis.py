@@ -137,6 +137,34 @@ class Recommendation(BaseModel):
     text: str
     evidence: list[Evidence] = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_text_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        text = normalized.get("text")
+        if text is None or (isinstance(text, str) and not text.strip()):
+            for key in (
+                "recommendation",
+                "action",
+                "suggestion",
+                "improvement",
+                "idea",
+                "title",
+                "summary",
+            ):
+                candidate = normalized.get(key)
+                if candidate is None:
+                    continue
+                candidate_text = str(candidate).strip()
+                if candidate_text:
+                    normalized["text"] = candidate_text
+                    break
+        elif not isinstance(text, str):
+            normalized["text"] = str(text)
+        return normalized
+
     @field_validator("evidence", mode="before")
     @classmethod
     def _coerce_evidence(cls, value: Any) -> list[Any]:
