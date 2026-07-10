@@ -8,3 +8,4 @@ from enum import Enum
 class ContentType(str, Enum):
     VIDEO = "VIDEO"
     IMAGE = "IMAGE"
+    CAROUSEL = "CAROUSEL"

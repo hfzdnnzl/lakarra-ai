@@ -66,11 +66,12 @@ def build_content_analysis_input(
     )
 
     media_source: MediaSource | None = None
-    if resolved_media and resolved_media.bytes:
+    if resolved_media and resolved_media.has_media:
         media_source = MediaSource(
             url=resolved_media.download_url,
             mime_type=resolved_media.mime_type,
             bytes=resolved_media.bytes,
+            carousel=resolved_media.carousel,
         )
 
     return ContentAnalysisInput(

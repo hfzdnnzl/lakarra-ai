@@ -9,45 +9,36 @@ from ..models.content_analysis import (
     CategoricalRating,
     Confidence,
     ContentAnalysis,
-    ContentAnalysisSectionUnion,
     ContentAnalysisSummary,
     ContentType,
     DimensionSummary,
     ExecutiveSummary,
-    ImageContentAnalysisSection,
     Impact,
     MetricsPassOutput,
     PerformanceAnalysisSection,
     PerformanceDiagnosisSection,
-    RatedDimension,
     RecommendationsSection,
     RootCause,
     SceneAnalysis,
     VideoContentAnalysisSection,
     VisualPassOutput,
 )
+from .content_merge_specs import default_dimension, get_merge_spec, pick_dimension
+
+# Re-export for tests and specs
+_default_dimension = default_dimension
+_pick_dimension = pick_dimension
 
 _IMPACT_ORDER = {Impact.HIGH: 0, Impact.MEDIUM: 1, Impact.LOW: 2}
 _CONFIDENCE_ORDER = {Confidence.HIGH: 0, Confidence.MEDIUM: 1, Confidence.LOW: 2}
-_RATING_ORDER = {
+
+RATING_ORDER = {
     CategoricalRating.EXCELLENT: 0,
     CategoricalRating.GOOD: 1,
     CategoricalRating.AVERAGE: 2,
     CategoricalRating.WEAK: 3,
     CategoricalRating.POOR: 4,
 }
-
-
-def _default_dimension() -> RatedDimension:
-    return RatedDimension(
-        rating=CategoricalRating.AVERAGE,
-        score=5,
-        confidence=Confidence.LOW,
-        explanation="Insufficient evidence for this dimension.",
-        strengths=[],
-        weaknesses=[],
-        recommendations=[],
-    )
 
 
 def _dedupe_root_causes(causes: list[RootCause]) -> list[RootCause]:
@@ -100,234 +91,21 @@ def _merge_recommendations(
     )
 
 
-def _pick_dimension(
-    visual: RatedDimension | None,
-    metrics: RatedDimension | None,
-    *,
-    has_visual: bool,
-) -> RatedDimension:
-    if has_visual and visual is not None:
-        return visual
-    if metrics is not None:
-        return metrics
-    return _default_dimension()
-
-
-def _merge_video_content(
-    metrics_partial: VideoContentAnalysisSection | None,
-    visual: VideoContentAnalysisSection | None,
-    *,
-    has_visual: bool,
-) -> VideoContentAnalysisSection:
-    metrics_partial = metrics_partial or VideoContentAnalysisSection(
-        hook=_default_dimension(),
-        story_script=_default_dimension(),
-        voiceover=_default_dimension(),
-        pacing=_default_dimension(),
-        scenes=[],
-    )
-    visual = visual or metrics_partial
-
-    return VideoContentAnalysisSection(
-        hook=_pick_dimension(
-            visual.hook if has_visual else None,
-            metrics_partial.hook,
-            has_visual=has_visual,
-        ),
-        story_script=_pick_dimension(
-            visual.story_script if has_visual else None,
-            metrics_partial.story_script,
-            has_visual=has_visual,
-        ),
-        voiceover=_pick_dimension(
-            visual.voiceover if has_visual else None,
-            metrics_partial.voiceover,
-            has_visual=has_visual,
-        ),
-        pacing=_pick_dimension(
-            visual.pacing if has_visual else None,
-            metrics_partial.pacing,
-            has_visual=has_visual,
-        ),
-        scenes=visual.scenes if has_visual else metrics_partial.scenes,
-    )
-
-
-def _merge_image_content(
-    metrics_partial: ImageContentAnalysisSection | None,
-    visual: ImageContentAnalysisSection | None,
-    *,
-    has_visual: bool,
-) -> ImageContentAnalysisSection:
-    metrics_partial = metrics_partial or ImageContentAnalysisSection(
-        composition=_default_dimension(),
-        typography=_default_dimension(),
-        visual_hierarchy=_default_dimension(),
-        branding=_default_dimension(),
-        message_clarity=_default_dimension(),
-        call_to_action=_default_dimension(),
-        visual_appeal=_default_dimension(),
-        color_harmony=_default_dimension(),
-        scroll_stopping_potential=_default_dimension(),
-    )
-    visual = visual or metrics_partial
-
-    return ImageContentAnalysisSection(
-        composition=_pick_dimension(
-            visual.composition if has_visual else None,
-            metrics_partial.composition,
-            has_visual=has_visual,
-        ),
-        typography=_pick_dimension(
-            visual.typography if has_visual else None,
-            metrics_partial.typography,
-            has_visual=has_visual,
-        ),
-        visual_hierarchy=_pick_dimension(
-            visual.visual_hierarchy if has_visual else None,
-            metrics_partial.visual_hierarchy,
-            has_visual=has_visual,
-        ),
-        branding=_pick_dimension(
-            visual.branding if has_visual else None,
-            metrics_partial.branding,
-            has_visual=has_visual,
-        ),
-        message_clarity=_pick_dimension(
-            visual.message_clarity if has_visual else None,
-            metrics_partial.message_clarity,
-            has_visual=has_visual,
-        ),
-        call_to_action=_pick_dimension(
-            visual.call_to_action if has_visual else None,
-            metrics_partial.call_to_action,
-            has_visual=has_visual,
-        ),
-        visual_appeal=_pick_dimension(
-            visual.visual_appeal if has_visual else None,
-            metrics_partial.visual_appeal,
-            has_visual=has_visual,
-        ),
-        color_harmony=_pick_dimension(
-            visual.color_harmony if has_visual else None,
-            metrics_partial.color_harmony,
-            has_visual=has_visual,
-        ),
-        scroll_stopping_potential=_pick_dimension(
-            visual.scroll_stopping_potential if has_visual else None,
-            metrics_partial.scroll_stopping_potential,
-            has_visual=has_visual,
-        ),
-    )
-
-
-def _as_video_section(
-    section: ContentAnalysisSectionUnion | None,
-) -> VideoContentAnalysisSection | None:
-    if section is None:
-        return None
-    if isinstance(section, VideoContentAnalysisSection):
-        return section
-    return None
-
-
-def _as_image_section(
-    section: ContentAnalysisSectionUnion | None,
-) -> ImageContentAnalysisSection | None:
-    if section is None:
-        return None
-    if isinstance(section, ImageContentAnalysisSection):
-        return section
-    return None
-
-
-def _merge_content_analysis(
-    content_type: ContentType,
-    metrics_partial: ContentAnalysisSectionUnion | None,
-    visual: ContentAnalysisSectionUnion | None,
-    *,
-    has_visual: bool,
-) -> ContentAnalysisSectionUnion:
-    if content_type == ContentType.IMAGE:
-        return _merge_image_content(
-            _as_image_section(metrics_partial),
-            _as_image_section(visual),
-            has_visual=has_visual,
-        )
-    return _merge_video_content(
-        _as_video_section(metrics_partial),
-        _as_video_section(visual),
-        has_visual=has_visual,
-    )
-
-
-def _merge_audience(
-    metrics_audience,
-    visual: VisualPassOutput | None,
-    *,
-    has_visual: bool,
-    content_type: ContentType,
-):
-    audience = metrics_audience.model_copy(deep=True)
-    if content_type != ContentType.VIDEO:
-        return audience
-    if has_visual and visual is not None:
-        content = _as_video_section(visual.content_analysis)
-        if content:
-            for scene in content.scenes:
-                if scene.score <= 4 and scene.explanation:
-                    point = f"{scene.start_timestamp} — {scene.explanation}"
-                    if point not in audience.drop_off_points:
-                        audience.drop_off_points.append(point)
-            if content.scenes:
-                best = min(content.scenes, key=lambda s: _RATING_ORDER.get(s.effectiveness, 9))
-                worst = max(content.scenes, key=lambda s: _RATING_ORDER.get(s.effectiveness, 0))
-                if not audience.strongest_timestamp and best.start_timestamp:
-                    audience.strongest_timestamp = best.start_timestamp
-                if not audience.weakest_timestamp and worst.start_timestamp:
-                    audience.weakest_timestamp = worst.start_timestamp
-    return audience
-
-
-def _dimension_pairs_for_summary(
-    content_type: ContentType,
-    content: ContentAnalysisSectionUnion,
-) -> list[tuple[str, RatedDimension]]:
-    if isinstance(content, ImageContentAnalysisSection):
-        return [
-            ("Composition", content.composition),
-            ("Typography", content.typography),
-            ("Visual hierarchy", content.visual_hierarchy),
-            ("Branding", content.branding),
-            ("Message clarity", content.message_clarity),
-            ("Call to action", content.call_to_action),
-            ("Visual appeal", content.visual_appeal),
-            ("Scroll-stop", content.scroll_stopping_potential),
-        ]
-    if isinstance(content, VideoContentAnalysisSection):
-        return [
-            ("Hook", content.hook),
-            ("Pacing", content.pacing),
-            ("Story", content.story_script),
-            ("Voiceover", content.voiceover),
-        ]
-    return []
-
-
 def _synthesize_executive_summary(
     content_type: ContentType,
-    content: ContentAnalysisSectionUnion,
+    content,
     diagnosis: PerformanceDiagnosisSection,
     recommendations: RecommendationsSection,
     *,
     has_visual: bool,
 ) -> ExecutiveSummary:
+    spec = get_merge_spec(content_type)
     root_causes = _sort_root_causes(diagnosis.root_causes)
     top_cause = root_causes[0] if root_causes else None
 
-    dimensions = _dimension_pairs_for_summary(content_type, content)
+    dimensions = spec.dimension_pairs_for_summary(content)
     if not dimensions:
-        dimensions = [("content", _default_dimension())]
+        dimensions = [("content", default_dimension())]
     best_dim = max(dimensions, key=lambda d: d[1].score)
     worst_dim = min(dimensions, key=lambda d: d[1].score)
 
@@ -337,7 +115,7 @@ def _synthesize_executive_summary(
         else "Review performance diagnosis and prioritize the highest-impact fix."
     )
 
-    content_label = "image" if content_type == ContentType.IMAGE else "video"
+    content_label = spec.content_label()
     if top_cause:
         verdict = (
             f"This {content_label} {'performed well' if best_dim[1].score >= 7 else 'underperformed'} "
@@ -395,21 +173,20 @@ def merge_passes(
     """Unify both passes into a single coherent analysis."""
 
     has_visual = visual is not None
+    spec = get_merge_spec(content_type)
     visual_content = visual.content_analysis if visual else None
     visual_diagnosis = visual.performance_diagnosis if visual else PerformanceDiagnosisSection()
     visual_recs = visual.recommendations if visual else RecommendationsSection()
 
-    content_analysis = _merge_content_analysis(
-        content_type,
+    content_analysis = spec.merge(
         metrics.content_analysis_partial,
         visual_content,
         has_visual=has_visual,
     )
-    audience_analysis = _merge_audience(
+    audience_analysis = spec.enrich_audience(
         metrics.audience_analysis,
         visual,
         has_visual=has_visual,
-        content_type=content_type,
     )
     performance_diagnosis = PerformanceDiagnosisSection(
         root_causes=_sort_root_causes(
@@ -454,6 +231,7 @@ def merge_passes(
 def project_content_analysis_summary(analysis: ContentAnalysis) -> ContentAnalysisSummary:
     """Slim projection for dashboard cards."""
 
+    spec = get_merge_spec(analysis.metadata.content_type)
     content = analysis.content_analysis
     ratings = [
         DimensionSummary(
@@ -463,7 +241,7 @@ def project_content_analysis_summary(analysis: ContentAnalysis) -> ContentAnalys
             confidence=d.confidence,
             explanation=d.explanation,
         )
-        for label, d in _dimension_pairs_for_summary(analysis.metadata.content_type, content)
+        for label, d in spec.dimension_pairs_for_summary(content)
     ]
 
     scenes: list[SceneAnalysis] = []

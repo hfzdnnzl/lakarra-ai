@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from .content_types import ContentType
 
+__all__ = ["ContentType"]
+
 
 def _coerce_str_list(value: Any) -> list[str]:
     if value is None:
@@ -35,14 +37,56 @@ def _coerce_str_list(value: Any) -> list[str]:
 
 
 @dataclass
+class CarouselPage:
+    """Single ordered slide in a carousel — index is zero-based and must be preserved."""
+
+    index: int
+    bytes: bytes
+    mime_type: str
+    width: int | None = None
+    height: int | None = None
+
+    @property
+    def aspect_ratio(self) -> float | None:
+        if self.width and self.height and self.height > 0:
+            return round(self.width / self.height, 4)
+        return None
+
+
+@dataclass
+class CarouselMedia:
+    """Ordered carousel pages — swipe sequence is defined by ascending page index."""
+
+    pages: list[CarouselPage]
+
+    def __post_init__(self) -> None:
+        self.pages = sorted(self.pages, key=lambda p: p.index)
+
+    @property
+    def page_count(self) -> int:
+        return len(self.pages)
+
+    def missing_indices(self, expected_count: int | None = None) -> list[int]:
+        """Return zero-based indices absent from the page list."""
+        if not self.pages:
+            return list(range(expected_count or 0))
+        upper = expected_count if expected_count is not None else self.pages[-1].index + 1
+        present = {page.index for page in self.pages}
+        return [idx for idx in range(upper) if idx not in present]
+
+
+@dataclass
 class MediaSource:
-    """Reference to analyzable media — bytes for uploads, URL for remote fetch."""
+    """Reference to analyzable media — bytes, carousel pages, or remote URL."""
 
     url: str | None = None
     mime_type: str | None = None
     bytes: bytes | None = None
+    carousel: CarouselMedia | None = None
 
     def has_media(self) -> bool:
+        if self.carousel and self.carousel.pages:
+            return True
         return bool(self.bytes) or bool(self.url)
 
 
@@ -78,6 +122,10 @@ class EvidenceSource(str, Enum):
     TYPOGRAPHY = "typography"
     BRANDING = "branding"
     CTA = "cta"
+    CAROUSEL_PAGE = "carousel_page"
+    COVER_SLIDE = "cover_slide"
+    SWIPE_MOTIVATION = "swipe_motivation"
+    NARRATIVE = "narrative"
 
 
 class Evidence(BaseModel):
@@ -173,8 +221,37 @@ class ImageContentAnalysisSection(BaseModel):
     scroll_stopping_potential: RatedDimension
 
 
+class CarouselPageAnalysis(BaseModel):
+    """Per-slide analysis within a carousel."""
+
+    page_index: int = Field(ge=0)
+    composition: RatedDimension
+    typography: RatedDimension
+    readability: RatedDimension
+    branding: RatedDimension
+    color_harmony: RatedDimension
+    whitespace: RatedDimension
+    cta_visibility: RatedDimension
+    emotional_appeal: RatedDimension
+
+
+class CarouselContentAnalysisSection(BaseModel):
+    type: Literal["CAROUSEL"] = "CAROUSEL"
+    cover_slide: RatedDimension
+    page_effectiveness: list[CarouselPageAnalysis] = Field(default_factory=list)
+    story_progression: RatedDimension
+    design_consistency: RatedDimension
+    swipe_engagement: RatedDimension
+    cta_effectiveness: RatedDimension
+    overall_flow: RatedDimension
+
+
 ContentAnalysisSectionUnion = Annotated[
-    Union[VideoContentAnalysisSection, ImageContentAnalysisSection],
+    Union[
+        VideoContentAnalysisSection,
+        ImageContentAnalysisSection,
+        CarouselContentAnalysisSection,
+    ],
     Field(discriminator="type"),
 ]
 
@@ -230,7 +307,7 @@ class AnalysisMetadata(BaseModel):
 
 
 class ContentAnalysis(BaseModel):
-    """Unified post-mortem analysis of published VIDEO or IMAGE content."""
+    """Unified post-mortem analysis of published VIDEO, IMAGE, or CAROUSEL content."""
 
     executive_summary: ExecutiveSummary
     content_analysis: ContentAnalysisSectionUnion

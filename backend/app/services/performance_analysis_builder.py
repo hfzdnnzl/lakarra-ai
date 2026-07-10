@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from ..models.analytics import EngagementMetrics, PerformanceMetrics
-from ..models.content_analysis import ContentType, PerformanceAnalysisSection
+from ..models.content_analysis import PerformanceAnalysisSection
+from ..models.content_types import ContentType
 from ..providers import TikTokVideoData
 from .content_metrics import apply_metrics_to_performance, metrics_from_row
 
@@ -38,6 +39,13 @@ def build_performance_analysis(
     if content_type == ContentType.IMAGE:
         summary = (
             f"The image post reached {performance.views:,} views with "
+            f"{engagement.engagement_rate:.1%} engagement rate "
+            f"({performance.likes:,} likes, {performance.comments:,} comments, "
+            f"{performance.shares:,} shares, {performance.saves:,} saves)."
+        )
+    elif content_type == ContentType.CAROUSEL:
+        summary = (
+            f"The carousel post reached {performance.views:,} views with "
             f"{engagement.engagement_rate:.1%} engagement rate "
             f"({performance.likes:,} likes, {performance.comments:,} comments, "
             f"{performance.shares:,} shares, {performance.saves:,} saves)."

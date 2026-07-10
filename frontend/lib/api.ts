@@ -157,7 +157,7 @@ export const api = {
     }),
   analyzeContent: (
     post_id: string,
-    options?: { contentId?: string; contentType?: "VIDEO" | "IMAGE"; force?: boolean },
+    options?: { contentId?: string; contentType?: "VIDEO" | "IMAGE" | "CAROUSEL"; force?: boolean },
   ) =>
     request<import("@/types").AnalysisResponse>(
       `/analytics/content/${post_id}/analyze?force=${options?.force ?? false}`,

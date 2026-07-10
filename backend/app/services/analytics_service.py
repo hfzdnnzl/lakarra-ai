@@ -71,6 +71,7 @@ from .content_metrics import (
 from .media_resolver import resolve_media_source
 from .performance_analysis_builder import build_performance_analysis
 from .prompts import load_prompt
+from .visual.prompts import resolve_visual_prompt_key
 from .storage_service import get_storage
 
 logger = logging.getLogger("lakarra.analytics_service")
@@ -773,23 +774,22 @@ class AnalyticsService:
             visual_provider: str | None = None
             visual_model: str | None = None
             visual_prompt_version: str | None = None
-            if media.bytes:
+            if media.has_media:
                 visual_provider = effective_visual_analysis_provider()
                 visual_model = effective_visual_analysis_model()
+                analysis_media = MediaSource(
+                    bytes=media.bytes,
+                    mime_type=media.mime_type,
+                    url=media.download_url,
+                    carousel=media.carousel,
+                )
                 visual_pass = self._analyst.analyze_visual_content(
                     analysis_input,
-                    MediaSource(
-                        bytes=media.bytes,
-                        mime_type=media.mime_type,
-                        url=media.download_url,
-                    ),
+                    analysis_media,
                 )
-                prompt_key = (
-                    "content_analyst/visual/image"
-                    if resolved_type == ContentType.IMAGE
-                    else "content_analyst/visual/video"
-                )
-                visual_prompt_version = load_prompt(prompt_key).version
+                visual_prompt_version = load_prompt(
+                    resolve_visual_prompt_key(resolved_type)
+                ).version
 
             version = self.repo.next_content_analysis_version(post_id)
             merged = merge_passes(

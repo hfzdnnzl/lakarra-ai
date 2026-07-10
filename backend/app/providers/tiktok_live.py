@@ -315,7 +315,67 @@ def download_tiktok_image(handle: str, post_id: str) -> tuple[bytes, str, str] |
     return raw, mime_type, image_url
 
 
+def download_tiktok_carousel(handle: str, post_id: str) -> CarouselMedia | None:
+    """Download TikTok carousel/photo-post slides in swipe order."""
+
+    from ..models.content_analysis import CarouselMedia, CarouselPage
+
+    normalized = normalize_tiktok_handle(handle)
+    if not normalized or not post_id:
+        return None
+
+    page_url = f"https://www.tiktok.com/@{normalized}/photo/{post_id}"
+    with _client() as client:
+        try:
+            data = _post_json(client, "/api/", data={"url": page_url, "hd": 1})
+        except TikTokFetchError:
+            return None
+
+    image_urls: list[str] = []
+    raw_images = data.get("images") or data.get("image_post") or []
+    if isinstance(raw_images, list):
+        for item in raw_images:
+            if isinstance(item, str) and item:
+                image_urls.append(item)
+            elif isinstance(item, dict):
+                url = item.get("url") or item.get("imageURL") or item.get("image_url")
+                if url:
+                    image_urls.append(str(url))
+
+    if not image_urls:
+        cover = data.get("cover") or data.get("origin_cover")
+        if cover:
+            image_urls = [str(cover)]
+
+    if not image_urls:
+        return None
+
+    max_bytes = get_settings().max_upload_bytes
+    timeout = get_settings().tiktok_fetch_timeout_seconds
+    pages: list[CarouselPage] = []
+    with _client() as client:
+        for index, image_url in enumerate(image_urls):
+            response = client.get(image_url, timeout=timeout)
+            if response.status_code != 200:
+                continue
+            raw = response.content
+            if len(raw) > max_bytes:
+                raise TikTokFetchError(f"TikTok carousel image exceeds max size ({max_bytes} bytes).")
+            mime_type = (
+                response.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                or "image/jpeg"
+            )
+            pages.append(CarouselPage(index=index, bytes=raw, mime_type=mime_type))
+
+    if not pages:
+        return None
+    return CarouselMedia(pages=pages)
+
+
 def _detect_content_type(raw: dict) -> ContentType:
+    images = raw.get("images") or raw.get("image_post") or []
+    if isinstance(images, list) and len(images) > 1:
+        return ContentType.CAROUSEL
     if raw.get("images") or raw.get("image_post"):
         return ContentType.IMAGE
     duration = int(raw.get("duration") or 0)

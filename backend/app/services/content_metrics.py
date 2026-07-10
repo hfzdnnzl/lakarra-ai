@@ -50,7 +50,7 @@ METRIC_FIELD_LABELS: dict[str, str] = {
 
 
 def optional_fields_for(content_type: ContentType) -> tuple[str, ...]:
-    if content_type == ContentType.IMAGE:
+    if content_type in (ContentType.IMAGE, ContentType.CAROUSEL):
         return IMAGE_OPTIONAL_METRIC_FIELDS
     return VIDEO_OPTIONAL_METRIC_FIELDS
 
@@ -141,6 +141,8 @@ def resolve_publish_metadata(
 def infer_content_type_from_mime(mime_type: str | None) -> ContentType | None:
     if not mime_type:
         return None
+    if mime_type == "application/vnd.lakarra.carousel+json":
+        return ContentType.CAROUSEL
     if mime_type.startswith("image/"):
         return ContentType.IMAGE
     if mime_type.startswith("video/"):

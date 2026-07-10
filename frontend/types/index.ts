@@ -259,7 +259,7 @@ export interface ReviewRunResponse {
 
 // --- Analytics (Phase 3) -----------------------------------------------------
 
-export type ContentType = "VIDEO" | "IMAGE";
+export type ContentType = "VIDEO" | "IMAGE" | "CAROUSEL";
 
 export interface AccountOverview {
   tiktok_handle?: string | null;

@@ -42,6 +42,7 @@ from ...services.content_visual_analysis import (
     VisualAnalysisContext,
     build_content_visual_analysis_service,
     parse_review_json,
+    resolve_visual_prompt_key,
 )
 from ..base import AgentRequest, AgentResult, BaseAgent
 from ..registry import register_agent
@@ -212,7 +213,7 @@ class ContentAnalystAgent(BaseAgent):
             indent=2,
         )
         analyzer = build_content_visual_analysis_service()
-        raw = analyzer._provider.analyze(
+        raw = analyzer.analyze_visual(
             content_type=ContentType.VIDEO,
             media=MediaSource(bytes=video_bytes, mime_type=mime_type),
             context=VisualAnalysisContext(
@@ -260,11 +261,7 @@ class ContentAnalystAgent(BaseAgent):
     ) -> VisualPassOutput:
         """Multimodal visual review of published VIDEO or IMAGE content."""
 
-        if input_data.content_type == ContentType.IMAGE:
-            prompt_name = "content_analyst/visual/image"
-        else:
-            prompt_name = "content_analyst/visual/video"
-
+        prompt_name = resolve_visual_prompt_key(input_data.content_type)
         template = load_prompt(prompt_name)
         plan_context = "(no CMS plan linked)"
         if input_data.linked_content_id and self._internal:

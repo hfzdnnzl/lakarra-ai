@@ -20,6 +20,8 @@ from ..models.content_analysis import (
     Confidence,
     Evidence,
     EvidenceSource,
+    CarouselContentAnalysisSection,
+    CarouselPageAnalysis,
     ImageContentAnalysisSection,
     Impact,
     MetricsPassOutput,
@@ -390,6 +392,157 @@ def build_image_visual_pass_response() -> str:
                     "Increase CTA button contrast and size",
                     EvidenceSource.CTA,
                     "CTA is hard to spot on mobile feed",
+                ),
+            ],
+        ),
+    )
+    return json.dumps(payload.model_dump(mode="json"), indent=2)
+
+
+def _carousel_page_analysis(page_index: int, *, score: int = 7) -> CarouselPageAnalysis:
+    dim = lambda explanation: RatedDimension(  # noqa: E731
+        rating=CategoricalRating.GOOD if score >= 7 else CategoricalRating.AVERAGE,
+        score=score,
+        confidence=Confidence.HIGH,
+        explanation=explanation,
+        strengths=[explanation],
+        weaknesses=[],
+        recommendations=[],
+    )
+    return CarouselPageAnalysis(
+        page_index=page_index,
+        composition=dim(f"Slide {page_index + 1} composition supports the narrative beat"),
+        typography=dim(f"Slide {page_index + 1} typography is readable at mobile scale"),
+        readability=dim(f"Slide {page_index + 1} text density is appropriate"),
+        branding=dim(f"Slide {page_index + 1} branding matches Lakarra palette"),
+        color_harmony=dim(f"Slide {page_index + 1} colors stay cohesive"),
+        whitespace=dim(f"Slide {page_index + 1} whitespace balances text and visuals"),
+        cta_visibility=dim(f"Slide {page_index + 1} CTA visibility is adequate"),
+        emotional_appeal=dim(f"Slide {page_index + 1} evokes aspiration"),
+    )
+
+
+def build_carousel_visual_pass_response(page_count: int = 3) -> str:
+    """Mock Pass 2 carousel visual analysis — per-page + whole-carousel."""
+
+    page_count = max(1, page_count)
+    pages = [_carousel_page_analysis(i, score=8 if i == 0 else 7 - (i % 2)) for i in range(page_count)]
+
+    cover = RatedDimension(
+        rating=CategoricalRating.GOOD if page_count > 1 else CategoricalRating.AVERAGE,
+        score=8 if page_count > 1 else 6,
+        confidence=Confidence.HIGH,
+        explanation="Cover slide uses bold headline and product visual to stop scrolling",
+        strengths=["Strong scroll-stop headline"],
+        weaknesses=["Could add more contrast on subhead"],
+        recommendations=[],
+    )
+
+    payload = VisualPassOutput(
+        content_analysis=CarouselContentAnalysisSection(
+            type="CAROUSEL",
+            cover_slide=cover,
+            page_effectiveness=pages,
+            story_progression=_dimension(
+                CategoricalRating.GOOD,
+                7,
+                Confidence.HIGH,
+                "Slides build from problem to solution across the swipe journey",
+            ),
+            design_consistency=_dimension(
+                CategoricalRating.GOOD,
+                8,
+                Confidence.HIGH,
+                "Typography and color palette stay consistent across slides",
+            ),
+            swipe_engagement=_dimension(
+                CategoricalRating.GOOD,
+                7,
+                Confidence.MEDIUM,
+                "Each slide ends with a reason to continue swiping",
+            ),
+            cta_effectiveness=_dimension(
+                CategoricalRating.WEAK,
+                4,
+                Confidence.HIGH,
+                "Final slide CTA is small and low contrast",
+            ),
+            overall_flow=_dimension(
+                CategoricalRating.GOOD,
+                7,
+                Confidence.MEDIUM,
+                "Information is distributed across slides without heavy repetition",
+            ),
+        ),
+        performance_diagnosis=PerformanceDiagnosisSection(
+            root_causes=[
+                RootCause(
+                    factor="Weak cover slide",
+                    estimated_impact=Impact.HIGH,
+                    confidence=Confidence.MEDIUM,
+                    explanation="Cover does not create enough curiosity for multi-slide swipes",
+                    evidence=[
+                        _evidence(EvidenceSource.COVER_SLIDE, "Headline competes with busy background"),
+                    ],
+                ),
+                RootCause(
+                    factor="Information overload on middle slides",
+                    estimated_impact=Impact.MEDIUM,
+                    confidence=Confidence.HIGH,
+                    explanation="Slides 2-3 pack too much text above the fold",
+                    evidence=[
+                        _evidence(
+                            EvidenceSource.CAROUSEL_PAGE,
+                            "Slide 2 — dense bullet list reduces readability",
+                        ),
+                    ],
+                ),
+                RootCause(
+                    factor="Weak CTA on final slide",
+                    estimated_impact=Impact.HIGH,
+                    confidence=Confidence.HIGH,
+                    explanation="CTA placement and contrast reduce conversion intent",
+                    evidence=[
+                        _evidence(EvidenceSource.CTA, "Final slide CTA blends into footer area"),
+                    ],
+                ),
+            ]
+        ),
+        recommendations=RecommendationsSection(
+            immediate_improvements=[
+                _rec(
+                    "Strengthen the cover headline with higher contrast",
+                    EvidenceSource.COVER_SLIDE,
+                    "Cover slide must earn the first swipe",
+                ),
+                _rec(
+                    "Reduce text density on middle slides",
+                    EvidenceSource.CAROUSEL_PAGE,
+                    "Slide 2 text block exceeds comfortable mobile reading length",
+                ),
+                _rec(
+                    "Move CTA to final slide with a high-contrast button",
+                    EvidenceSource.CTA,
+                    "Final slide CTA is hard to spot",
+                ),
+            ],
+            experiments=[
+                _rec(
+                    "Break complex information into more slides",
+                    EvidenceSource.NARRATIVE,
+                    "Mid-carousel information density may cause swipe abandonment",
+                ),
+                _rec(
+                    "Improve transition hooks between slides",
+                    EvidenceSource.SWIPE_MOTIVATION,
+                    "Add end-of-slide teasers that preview the next slide",
+                ),
+            ],
+            future_content_ideas=[
+                _rec(
+                    "Test a version with increased whitespace per slide",
+                    EvidenceSource.COMPOSITION,
+                    "Whitespace improves readability on small screens",
                 ),
             ],
         ),
