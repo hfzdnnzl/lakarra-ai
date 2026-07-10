@@ -57,6 +57,31 @@ class NotFoundError(LakarraError):
     http_status = 404
 
 
+class MissingAccountHandleError(LakarraError):
+    error_type = "missing_account_handle"
+    http_status = 400
+
+
+class TikTokFetchError(LakarraError):
+    error_type = "tiktok_fetch_error"
+    http_status = 502
+
+
+class MetricsIncompleteError(LakarraError):
+    error_type = "metrics_incomplete"
+    http_status = 400
+
+
+class MissingMediaError(LakarraError):
+    error_type = "missing_media"
+    http_status = 400
+
+
+class ConflictError(LakarraError):
+    error_type = "conflict"
+    http_status = 409
+
+
 _ERROR_CLASSES = [
     MissingAPIKeyError,
     LLMTimeoutError,
@@ -65,6 +90,11 @@ _ERROR_CLASSES = [
     InvalidJSONError,
     OutputValidationError,
     NotFoundError,
+    MissingAccountHandleError,
+    TikTokFetchError,
+    MetricsIncompleteError,
+    MissingMediaError,
+    ConflictError,
 ]
 
 #: Map of ``error_type`` -> suggested HTTP status.

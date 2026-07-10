@@ -14,7 +14,12 @@ import os
 os.environ["AUTO_INIT_DB"] = "false"
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["LLM_PROVIDER"] = "mock"
-os.environ["VIDEO_ANALYSIS_PROVIDER"] = "mock"
+os.environ["VISUAL_ANALYSIS_PROVIDER"] = "mock"
+os.environ.pop("VIDEO_ANALYSIS_PROVIDER", None)
+os.environ.pop("GEMINI_API_KEY", None)
+os.environ.pop("OPENAI_API_KEY", None)
+os.environ["TIKTOK_ACCOUNT_HANDLE"] = "lakarra"
+os.environ["TIKTOK_PROVIDER"] = "mock"
 
 import pytest  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
@@ -22,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import app.models.db  # noqa: E402,F401  (register ORM tables on Base.metadata)
+from app.config import get_settings  # noqa: E402
 from app.database.base import Base  # noqa: E402
 from app.database.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -42,6 +48,7 @@ app.dependency_overrides[get_db] = _override_get_db
 
 @pytest.fixture(autouse=True)
 def _fresh_db():
+    get_settings.cache_clear()
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )

@@ -256,3 +256,275 @@ export interface ReviewRunResponse {
   error?: string | null;
   error_type?: string | null;
 }
+
+// --- Analytics (Phase 3) -----------------------------------------------------
+
+export type ContentType = "VIDEO" | "IMAGE" | "CAROUSEL";
+
+export interface AccountOverview {
+  tiktok_handle?: string | null;
+  account_configured: boolean;
+  live_data_error?: string | null;
+  account_health_score: number;
+  total_videos: number;
+  total_views: number;
+  avg_engagement_rate: number;
+  recent_videos: Array<{
+    video_id: string;
+    title: string;
+    views: number;
+    category: string;
+    publish_date: string;
+  }>;
+  best_performers: Array<{
+    video_id: string;
+    title: string;
+    views: number;
+    engagement_rate?: number;
+  }>;
+  worst_performers: Array<{
+    video_id: string;
+    title: string;
+    views: number;
+  }>;
+  posting_heatmap: Record<string, number>;
+  performance_trends: Array<{
+    video_id: string;
+    title?: string;
+    views: number;
+    publish_date: string;
+  }>;
+  growth_trends: Array<Record<string, unknown>>;
+}
+
+export interface AnalysisRecord {
+  id: string;
+  version: number;
+  subject_id: string;
+  agent: string;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ContentAnalysisRecord extends AnalysisRecord {
+  video_id: string;
+}
+
+export interface CompetitorAnalysisRecord extends AnalysisRecord {
+  handle: string;
+}
+
+export interface TrendReportRecord extends AnalysisRecord {
+  period: string;
+}
+
+export interface ReviewReportRecord extends AnalysisRecord {
+  content_id: string;
+  decision: string | null;
+  decision_comment: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+}
+
+export interface CompetitorOverview {
+  competitors: Array<{
+    handle: string;
+    follower_count: number;
+    average_views: number;
+    engagement_rate: number;
+    posting_frequency: string;
+  }>;
+  latest_analyses: CompetitorAnalysisRecord[];
+}
+
+export interface ReviewQueueItem {
+  content_id: string;
+  title: string;
+  category: string;
+  status: string;
+  confidence_score: number;
+  latest_review: ReviewReportRecord | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HistoricalAnalytics {
+  content_analyses: ContentAnalysisRecord[];
+  competitor_analyses: CompetitorAnalysisRecord[];
+  trend_reports: TrendReportRecord[];
+  review_reports: ReviewReportRecord[];
+  pattern_analyses: AnalysisRecord[];
+  metrics_snapshots: AnalyticsSnapshot[];
+}
+
+export interface AnalysisResponse {
+  success: boolean;
+  data?: Record<string, unknown> | null;
+  analysis_id?: string | null;
+  version?: number | null;
+  error?: string | null;
+  error_type?: string | null;
+  skipped?: boolean;
+  skip_reason?: string | null;
+}
+
+export interface VideoMetrics {
+  video_id: string;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  reach?: number | null;
+  watch_time?: number | null;
+  average_watch_duration?: number | null;
+  completion_rate?: number | null;
+  profile_visits?: number | null;
+  followers_gained?: number | null;
+  link_clicks?: number | null;
+  user_notes?: string | null;
+  publish_date?: string | null;
+  publish_time?: string | null;
+  required_complete: boolean;
+  missing_required: string[];
+  metrics_priority: string;
+}
+
+export interface Evidence {
+  source: string;
+  description: string;
+}
+
+export interface Recommendation {
+  text: string;
+  evidence: Evidence[];
+}
+
+export interface ExecutiveSummary {
+  overall_verdict: string;
+  confidence: string;
+  primary_reason_for_performance: string;
+  biggest_strength: string;
+  biggest_weakness: string;
+  first_priority_action: string;
+}
+
+export interface DimensionSummary {
+  label: string;
+  rating: string;
+  score: number;
+  confidence: string;
+  explanation: string;
+}
+
+export interface SceneAnalysis {
+  start_timestamp: string;
+  end_timestamp: string;
+  purpose: string;
+  effectiveness: string;
+  score: number;
+  confidence: string;
+  explanation: string;
+  recommendations: Recommendation[];
+}
+
+export interface RootCause {
+  factor: string;
+  estimated_impact: string;
+  confidence: string;
+  explanation: string;
+  evidence: Evidence[];
+}
+
+export interface PerformanceSignal {
+  name: string;
+  value: number | null;
+  unit: string;
+  available: boolean;
+  evidence?: Evidence | null;
+}
+
+export interface AnalysisInputs {
+  metrics: VideoMetrics;
+  signals: PerformanceSignal[];
+  unavailable_signals: string[];
+}
+
+export interface ContentAnalysisSummary {
+  content_type: ContentType;
+  executive_summary: ExecutiveSummary;
+  content_ratings: DimensionSummary[];
+  scenes: SceneAnalysis[];
+  top_root_causes: RootCause[];
+  immediate_improvements: Recommendation[];
+  experiments: Recommendation[];
+  future_content_ideas: Recommendation[];
+  performance_summary: string;
+  analysis_inputs?: AnalysisInputs;
+  analysis_mode: "full" | "metrics_only";
+  visual_provider?: string | null;
+}
+
+/** @deprecated Use ContentAnalysisSummary */
+export type VideoAnalysisSummary = ContentAnalysisSummary;
+
+export interface ContentCatalogItem {
+  video_id: string;
+  content_type: ContentType;
+  title: string;
+  url: string;
+  caption: string;
+  publish_date: string;
+  publish_time?: string;
+  duration: number;
+  thumbnail: string;
+  is_analyzed: boolean;
+  analysis_version: number | null;
+  analysis_id: string | null;
+  analysis?: ContentAnalysisSummary | null;
+  has_media_upload?: boolean;
+  has_video_upload?: boolean;
+  upload_filename?: string | null;
+  metrics: VideoMetrics;
+  metrics_priority: string;
+}
+
+/** @deprecated Use ContentCatalogItem */
+export type VideoCatalogItem = ContentCatalogItem;
+
+export interface MetricsReadiness {
+  ready: boolean;
+  total_videos: number;
+  complete_videos: number;
+  incomplete_videos: Array<{
+    video_id: string;
+    title: string;
+    missing_required: string[];
+  }>;
+  required_fields: string[];
+  optional_fields: string[];
+  optional_recommended_for: string[];
+}
+
+export interface ContentAnalyticsPage {
+  overview: AccountOverview;
+  readiness: MetricsReadiness;
+  videos: VideoCatalogItem[];
+  required_field_labels: Record<string, string>;
+  optional_field_labels: Record<string, string>;
+}
+
+export interface AnalyzeAllResponse {
+  analyzed: AnalysisResponse[];
+  skipped_video_ids: string[];
+  errors: Array<{ video_id: string; error?: string; error_type?: string }>;
+}
+
+export interface AccountSettings {
+  tiktok_handle: string | null;
+  configured: boolean;
+  source: "database" | "environment" | "none";
+}

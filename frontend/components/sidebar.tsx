@@ -47,7 +47,10 @@ export function Sidebar() {
       <nav className="flex-1 space-y-1 px-3 py-2">
         {nav.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href;
+          const active =
+            item.href === "/analytics"
+              ? pathname === item.href || pathname.startsWith("/analytics/")
+              : pathname === item.href;
           return (
             <Link
               key={item.href}
@@ -65,7 +68,7 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="px-6 py-4 text-xs text-muted-foreground">Phase 1 · Scaffold</div>
+      <div className="px-6 py-4 text-xs text-muted-foreground">Phase 3 · Content Analyst</div>
     </aside>
   );
 }

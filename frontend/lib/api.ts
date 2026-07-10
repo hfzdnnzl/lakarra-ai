@@ -8,7 +8,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!res.ok) {
-    throw new Error(`API ${path} failed: ${res.status}`);
+    let message = `API ${path} failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string" && body.detail.trim()) {
+        message = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        const parts = body.detail
+          .map((item) => {
+            if (typeof item === "string") return item;
+            if (item && typeof item === "object" && "msg" in item) {
+              return String((item as { msg?: string }).msg ?? "");
+            }
+            return "";
+          })
+          .filter(Boolean);
+        if (parts.length > 0) message = parts.join("; ");
+      }
+    } catch {
+      // Keep the generic status message when the body is not JSON.
+    }
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }
@@ -116,5 +136,106 @@ export const api = {
     request<import("@/types").ContentDetail>(`/content/${id}/performance-notes`, {
       method: "PATCH",
       body: JSON.stringify({ performance_notes }),
+    }),
+
+  // --- Analytics (Phase 3) -------------------------------------------------
+  analyticsAccountSettings: () =>
+    request<import("@/types").AccountSettings>("/analytics/account/settings"),
+  updateAnalyticsAccount: (tiktok_handle: string) =>
+    request<import("@/types").AccountSettings>("/analytics/account/settings", {
+      method: "PUT",
+      body: JSON.stringify({ tiktok_handle }),
+    }),
+  analyticsOverview: () => request<import("@/types").AccountOverview>("/analytics/overview"),
+  analyticsContent: () => request<import("@/types").ContentAnalyticsPage>("/analytics/content"),
+  analyticsMetricsReadiness: () =>
+    request<import("@/types").MetricsReadiness>("/analytics/metrics/readiness"),
+  updateVideoMetrics: (video_id: string, body: Record<string, unknown>) =>
+    request<import("@/types").VideoMetrics>(`/analytics/videos/${video_id}/metrics`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  analyzeContent: (
+    post_id: string,
+    options?: { contentId?: string; contentType?: "VIDEO" | "IMAGE" | "CAROUSEL"; force?: boolean },
+  ) =>
+    request<import("@/types").AnalysisResponse>(
+      `/analytics/content/${post_id}/analyze?force=${options?.force ?? false}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          content_id: options?.contentId,
+          content_type: options?.contentType,
+        }),
+      },
+    ),
+  analyzeVideoById: (video_id: string, force = false) =>
+    request<import("@/types").AnalysisResponse>(
+      `/analytics/videos/${video_id}/analyze?force=${force}`,
+      { method: "POST" },
+    ),
+  uploadAnalyticsVideo: async (video_id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_URL}/analytics/videos/${video_id}/upload`, {
+      method: "POST",
+      body: form,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let message = `Upload failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { detail?: string };
+        if (body.detail) message = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<{
+      video_id: string;
+      original_filename: string;
+      mime_type: string;
+      file_size: number;
+    }>;
+  },
+  analyticsVideoStreamUrl: (video_id: string) =>
+    `${API_URL}/analytics/videos/${video_id}/upload/stream`,
+  deleteAnalyticsVideoUpload: (video_id: string) =>
+    request<void>(`/analytics/videos/${video_id}/upload`, { method: "DELETE" }),
+  analyticsCompetitors: () => request<import("@/types").CompetitorOverview>("/analytics/competitors"),
+  analyticsTrends: () =>
+    request<{ reports: import("@/types").TrendReportRecord[] }>("/analytics/trends"),
+  analyticsReviewQueue: () => request<import("@/types").ReviewQueueItem[]>("/analytics/review-queue"),
+  analyticsHistorical: () => request<import("@/types").HistoricalAnalytics>("/analytics/historical"),
+  analyzeAccount: () =>
+    request<import("@/types").AnalysisResponse>("/analytics/account/analyze", { method: "POST" }),
+  analyzeVideo: (video_id: string, content_id?: string) =>
+    request<import("@/types").AnalysisResponse>("/analytics/videos/analyze", {
+      method: "POST",
+      body: JSON.stringify({ video_id, content_id }),
+    }),
+  analyzeAllVideos: () =>
+    request<import("@/types").AnalyzeAllResponse>("/analytics/videos/analyze-all", {
+      method: "POST",
+    }),
+  analyzeCompetitor: (handle: string) =>
+    request<import("@/types").AnalysisResponse>("/analytics/competitors/analyze", {
+      method: "POST",
+      body: JSON.stringify({ handle }),
+    }),
+  reviewContentAnalytics: (content_id: string) =>
+    request<import("@/types").AnalysisResponse>(`/analytics/content/${content_id}/review`, {
+      method: "POST",
+    }),
+  generateTrendReport: (period = "30d") =>
+    request<import("@/types").AnalysisResponse>("/analytics/trends/generate", {
+      method: "POST",
+      body: JSON.stringify({ period }),
+    }),
+  decideReview: (report_id: string, decision: string, comment?: string) =>
+    request<import("@/types").AnalysisResponse>(`/analytics/reviews/${report_id}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, comment }),
     }),
 };

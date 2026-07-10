@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -74,13 +74,42 @@ class Settings(BaseSettings):
     # --- Scheduler ---------------------------------------------------------
     scheduler_enabled: bool = False
 
-    # --- Video analysis (upload review) ------------------------------------
-    video_analysis_provider: Literal["mock", "gemini", "openai"] = "mock"
-    video_analysis_model: str = "gemini-2.0-flash"
+    # --- Visual content analysis (upload review + analytics pass 2) ---------
+    # ``auto`` picks gemini when GEMINI_API_KEY is set, else openai when OPENAI_API_KEY
+    # is set, otherwise mock. Set explicitly to mock/gemini/openai to override.
+    visual_analysis_provider: Literal["auto", "mock", "gemini", "openai"] = Field(
+        default="auto",
+        validation_alias=AliasChoices("VISUAL_ANALYSIS_PROVIDER", "VIDEO_ANALYSIS_PROVIDER"),
+    )
+    visual_analysis_model: str = Field(
+        default="gemini-2.0-flash",
+        validation_alias=AliasChoices("VISUAL_ANALYSIS_MODEL", "VIDEO_ANALYSIS_MODEL"),
+    )
     max_upload_bytes: int = 52_428_800  # 50 MB
     allowed_upload_mime_types: list[str] = Field(
-        default_factory=lambda: ["video/mp4", "video/quicktime", "video/webm"]
+        default_factory=lambda: [
+            "video/mp4",
+            "video/quicktime",
+            "video/webm",
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "application/vnd.lakarra.carousel+json",
+        ]
     )
+
+    # --- TikTok analytics (Content Analyst) --------------------------------
+    # Your Lakarra TikTok @handle (without @). Can also be set via the dashboard
+    # or PUT /api/analytics/account/settings — the saved value takes precedence.
+    tiktok_account_handle: str = ""
+    # ``live`` fetches real public TikTok data; ``mock`` is for offline tests only.
+    tiktok_provider: Literal["live", "mock"] = "live"
+    tiktok_api_base_url: str = "https://www.tikwm.com"
+    tiktok_max_videos: int = 35
+    tiktok_fetch_timeout_seconds: float = 45.0
+    tiktok_cache_ttl_seconds: float = 60.0
+    tiktok_rate_limit_retries: int = 3
+    tiktok_rate_limit_retry_seconds: float = 1.2
 
 
 @lru_cache
@@ -88,3 +117,43 @@ def get_settings() -> Settings:
     """Return a cached ``Settings`` instance."""
 
     return Settings()
+
+
+def effective_visual_analysis_provider(
+    settings: Settings | None = None,
+) -> Literal["mock", "gemini", "openai"]:
+    """Resolve which visual analysis backend to use."""
+
+    s = settings or get_settings()
+    if s.visual_analysis_provider != "auto":
+        return s.visual_analysis_provider
+    if s.gemini_api_key:
+        return "gemini"
+    if s.openai_api_key:
+        from .services.ffmpeg_utils import ffmpeg_available
+
+        if ffmpeg_available():
+            return "openai"
+    return "mock"
+
+
+def effective_visual_analysis_model(settings: Settings | None = None) -> str:
+    """Pick a model name appropriate for the resolved visual analysis provider."""
+
+    s = settings or get_settings()
+    provider = effective_visual_analysis_provider(s)
+    model = s.visual_analysis_model
+    if provider == "openai":
+        if model.startswith(("gpt-", "o1", "o3", "o4")):
+            return model
+        return s.model_name if s.model_name.startswith(("gpt-", "o1", "o3", "o4")) else "gpt-4o"
+    if provider == "gemini" and model.startswith("gemini"):
+        return model
+    if provider == "gemini":
+        return "gemini-2.0-flash"
+    return model
+
+
+# Legacy aliases
+effective_video_analysis_provider = effective_visual_analysis_provider
+effective_video_analysis_model = effective_visual_analysis_model

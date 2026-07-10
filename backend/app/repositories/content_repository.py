@@ -185,6 +185,30 @@ class ContentRepository:
     def get(self, content_id: str) -> Content | None:
         return self.session.get(Content, content_id)
 
+    def get_by_tiktok_video_id(self, video_id: str) -> Content | None:
+        stmt = select(Content).where(Content.tiktok_video_id == video_id).limit(1)
+        return self.session.scalar(stmt)
+
+    def get_latest_video_asset(self, content_id: str) -> ContentAsset | None:
+        stmt = (
+            select(ContentAsset)
+            .where(ContentAsset.content_id == content_id)
+            .where(ContentAsset.mime_type.like("video/%"))
+            .order_by(ContentAsset.created_at.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
+
+    def link_tiktok_video(self, content: Content, *, video_id: str) -> Content:
+        content.tiktok_video_id = video_id
+        self.session.flush()
+        return content
+
+    def unlink_tiktok_video(self, content: Content) -> Content:
+        content.tiktok_video_id = None
+        self.session.flush()
+        return content
+
     def list(
         self,
         *,

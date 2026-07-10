@@ -129,6 +129,7 @@ class Content(TimestampMixin, Base):
     active_version: Mapped[int] = mapped_column(Integer, default=1)
     constraints: Mapped[list] = mapped_column(JSON, default=list)
     performance_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tiktok_video_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
     scenes: Mapped[list[ContentScene]] = relationship(
         back_populates="content",
@@ -274,3 +275,169 @@ class ContentGeneration(Base):
     token_usage: Mapped[dict] = mapped_column(JSON, default=dict)
     generation_time: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Content Analyst (Phase 3) — versioned analysis persistence
+# ---------------------------------------------------------------------------
+
+
+class ContentAnalysisORM(TimestampMixin, Base):
+    """Versioned analysis of a published Lakarra TikTok video."""
+
+    __tablename__ = "content_analyses"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(128), index=True)
+    content_id: Mapped[str | None] = mapped_column(
+        ForeignKey("contents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    agent: Mapped[str] = mapped_column(String(64), default="content_analyst")
+    provider: Mapped[str] = mapped_column(String(64), default="mock")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_version: Mapped[str] = mapped_column(String(128), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class CompetitorAnalysisORM(TimestampMixin, Base):
+    """Versioned competitor TikTok account analysis."""
+
+    __tablename__ = "competitor_analyses"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    handle: Mapped[str] = mapped_column(String(128), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    agent: Mapped[str] = mapped_column(String(64), default="content_analyst")
+    provider: Mapped[str] = mapped_column(String(64), default="mock")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_version: Mapped[str] = mapped_column(String(128), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class TrendReportORM(TimestampMixin, Base):
+    """Versioned trend report from historical analysis."""
+
+    __tablename__ = "trend_reports"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    period: Mapped[str] = mapped_column(String(32), default="30d")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    agent: Mapped[str] = mapped_column(String(64), default="content_analyst")
+    provider: Mapped[str] = mapped_column(String(64), default="mock")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_version: Mapped[str] = mapped_column(String(128), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class ReviewReportORM(TimestampMixin, Base):
+    """Versioned Content Creator output review (analyst never rewrites content)."""
+
+    __tablename__ = "review_reports"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    content_id: Mapped[str] = mapped_column(
+        ForeignKey("contents.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    agent: Mapped[str] = mapped_column(String(64), default="content_analyst")
+    provider: Mapped[str] = mapped_column(String(64), default="mock")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_version: Mapped[str] = mapped_column(String(128), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    decision: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decision_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CommentAnalysisORM(TimestampMixin, Base):
+    """Versioned comment intelligence for a video."""
+
+    __tablename__ = "comment_analyses"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(128), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    agent: Mapped[str] = mapped_column(String(64), default="content_analyst")
+    provider: Mapped[str] = mapped_column(String(64), default="mock")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_version: Mapped[str] = mapped_column(String(128), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class PatternAnalysisORM(TimestampMixin, Base):
+    """Versioned historical pattern recognition."""
+
+    __tablename__ = "pattern_analyses"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    subject_id: Mapped[str] = mapped_column(String(128), default="account", index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    agent: Mapped[str] = mapped_column(String(64), default="content_analyst")
+    provider: Mapped[str] = mapped_column(String(64), default="mock")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_version: Mapped[str] = mapped_column(String(128), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class MetricsSnapshotORM(TimestampMixin, Base):
+    """Point-in-time metrics snapshot (Phase 3 analytics)."""
+
+    __tablename__ = "metrics_snapshots"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    metric: Mapped[str] = mapped_column(String(128), index=True)
+    value: Mapped[float] = mapped_column(Float)
+    dimension: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AnalyticsAccountSettingsORM(TimestampMixin, Base):
+    """Singleton row storing the connected Lakarra TikTok account handle."""
+
+    __tablename__ = "analytics_account_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
+    tiktok_handle: Mapped[str] = mapped_column(String(128), default="")
+
+
+class VideoMetricsORM(TimestampMixin, Base):
+    """User-editable TikTok metrics per video (supplements public API data)."""
+
+    __tablename__ = "video_metrics"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    tiktok_handle: Mapped[str] = mapped_column(String(128), index=True)
+    # Required metrics
+    views: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    likes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comments: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    shares: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    saves: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Optional metrics (TikTok Studio / Creator Center)
+    reach: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    watch_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    average_watch_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completion_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    profile_visits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    followers_gained: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    link_clicks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    publish_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    publish_time: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+
+class VideoUploadORM(TimestampMixin, Base):
+    """User-uploaded TikTok video file for analytics visual analysis."""
+
+    __tablename__ = "video_uploads"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    tiktok_handle: Mapped[str] = mapped_column(String(128), index=True)
+    storage_key: Mapped[str] = mapped_column(String(512))
+    mime_type: Mapped[str] = mapped_column(String(128))
+    file_size: Mapped[int] = mapped_column(Integer)
+    original_filename: Mapped[str] = mapped_column(String(255))
