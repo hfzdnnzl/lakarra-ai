@@ -6,6 +6,7 @@ Reusable primitives and sectioned analysis for Content Analyst and future agents
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -70,6 +71,9 @@ def _sanitize_recommendations(value: Any) -> list[Any]:
 
     sanitized: list[Any] = []
     for item in value:
+        if isinstance(item, BaseModel):
+            sanitized.append(item)
+            continue
         if not isinstance(item, dict):
             logger.warning("recommendation.dropped_non_dict_item item=%r", item)
             continue
@@ -114,6 +118,183 @@ def _coerce_str_list(value: Any) -> list[str]:
         return items
     text = str(value).strip()
     return [text] if text else []
+
+
+def _normalize_enum_key(value: Any) -> str | None:
+    if isinstance(value, Enum):
+        value = value.value
+    if value is None:
+        return None
+    text = value.strip() if isinstance(value, str) else str(value).strip()
+    if not text:
+        return None
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+def _coerce_closed_enum(
+    value: Any,
+    enum_cls: type[Enum],
+    *,
+    default: Enum,
+    synonyms: dict[str, str],
+) -> Enum:
+    if isinstance(value, enum_cls):
+        return value
+
+    normalized = _normalize_enum_key(value)
+    canonical_members = {
+        _normalize_enum_key(member.value): member for member in enum_cls  # type: ignore[attr-defined]
+    }
+
+    if normalized is None:
+        logger.warning(
+            "content_analysis.enum_defaulted enum=%s raw=%r default=%s reason=missing",
+            enum_cls.__name__,
+            value,
+            default.value,
+        )
+        return default
+
+    exact_match = canonical_members.get(normalized)
+    if exact_match is not None:
+        if not (isinstance(value, str) and value == exact_match.value):
+            logger.warning(
+                "content_analysis.enum_normalized enum=%s raw=%r normalized=%s resolved=%s",
+                enum_cls.__name__,
+                value,
+                normalized,
+                exact_match.value,
+            )
+        return exact_match
+
+    synonym_target = synonyms.get(normalized)
+    if synonym_target is not None:
+        resolved = canonical_members.get(_normalize_enum_key(synonym_target))
+        if resolved is None:
+            raise ValueError(
+                f"Invalid synonym mapping for {enum_cls.__name__}: {normalized!r} -> {synonym_target!r}"
+            )
+        logger.warning(
+            "content_analysis.enum_normalized enum=%s raw=%r normalized=%s resolved=%s",
+            enum_cls.__name__,
+            value,
+            normalized,
+            resolved.value,
+        )
+        return resolved
+
+    logger.warning(
+        "content_analysis.enum_defaulted enum=%s raw=%r normalized=%s default=%s",
+        enum_cls.__name__,
+        value,
+        normalized,
+        default.value,
+    )
+    return default
+
+
+def _coerce_required_text(value: Any, *, fallback: str, field_name: str) -> str:
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            return text
+        logger.warning(
+            "content_analysis.text_defaulted field=%s raw=%r fallback=%r",
+            field_name,
+            value,
+            fallback,
+        )
+        return fallback
+
+    if value is None:
+        logger.warning(
+            "content_analysis.text_defaulted field=%s raw=%r fallback=%r",
+            field_name,
+            value,
+            fallback,
+        )
+        return fallback
+
+    text = str(value).strip()
+    if text:
+        logger.warning(
+            "content_analysis.text_normalized field=%s raw=%r normalized=%r",
+            field_name,
+            value,
+            text,
+        )
+        return text
+
+    logger.warning(
+        "content_analysis.text_defaulted field=%s raw=%r fallback=%r",
+        field_name,
+        value,
+        fallback,
+    )
+    return fallback
+
+
+_CATEGORICAL_RATING_SYNONYMS: dict[str, str] = {
+    "outstanding": "excellent",
+    "exceptional": "excellent",
+    "great": "good",
+    "very_good": "good",
+    "solid": "good",
+    "strong": "good",
+    "fair": "average",
+    "okay": "average",
+    "ok": "average",
+    "moderate": "average",
+    "mixed": "average",
+    "below_average": "weak",
+    "bad": "weak",
+    "needs_work": "weak",
+    "very_bad": "poor",
+    "terrible": "poor",
+    "awful": "poor",
+}
+
+_CONFIDENCE_SYNONYMS: dict[str, str] = {
+    "certain": "high",
+    "very_confident": "high",
+    "strong": "high",
+    "moderate": "medium",
+    "somewhat_confident": "medium",
+    "mixed": "medium",
+    "tentative": "low",
+    "speculative": "low",
+    "uncertain": "low",
+}
+
+_IMPACT_SYNONYMS: dict[str, str] = {
+    "severe": "high",
+    "significant": "high",
+    "major": "high",
+    "substantial": "high",
+    "moderate": "medium",
+    "notable": "medium",
+    "meaningful": "medium",
+    "minor": "low",
+    "minimal": "low",
+    "slight": "low",
+    "limited": "low",
+}
+
+_EVIDENCE_SOURCE_SYNONYMS: dict[str, str] = {
+    "analytics": "metrics",
+    "engagement": "metrics",
+    "engagement_metrics": "metrics",
+    "retention_curve": "retention",
+    "completion": "completion_rate",
+    "average_watch_duration": "watch_duration",
+    "avg_watch_duration": "watch_duration",
+    "watch_time": "watch_duration",
+    "cover": "cover_slide",
+    "slide": "carousel_page",
+    "carousel": "carousel_page",
+    "swipe": "swipe_motivation",
+    "story": "narrative",
+}
 
 
 @dataclass
@@ -212,6 +393,25 @@ class Evidence(BaseModel):
     source: EvidenceSource
     description: str
 
+    @field_validator("source", mode="before")
+    @classmethod
+    def _coerce_source(cls, value: Any) -> EvidenceSource:
+        return _coerce_closed_enum(
+            value,
+            EvidenceSource,
+            default=EvidenceSource.METRICS,
+            synonyms=_EVIDENCE_SOURCE_SYNONYMS,
+        )
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _coerce_description(cls, value: Any) -> str:
+        return _coerce_required_text(
+            value,
+            fallback="Evidence description not provided.",
+            field_name="Evidence.description",
+        )
+
 
 class Recommendation(BaseModel):
     text: str
@@ -256,6 +456,26 @@ class RatedDimension(BaseModel):
     @classmethod
     def _sanitize_recommendations(cls, value: Any) -> list[Any]:
         return _sanitize_recommendations(value)
+
+    @field_validator("rating", mode="before")
+    @classmethod
+    def _coerce_rating(cls, value: Any) -> CategoricalRating:
+        return _coerce_closed_enum(
+            value,
+            CategoricalRating,
+            default=CategoricalRating.AVERAGE,
+            synonyms=_CATEGORICAL_RATING_SYNONYMS,
+        )
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _coerce_confidence(cls, value: Any) -> Confidence:
+        return _coerce_closed_enum(
+            value,
+            Confidence,
+            default=Confidence.MEDIUM,
+            synonyms=_CONFIDENCE_SYNONYMS,
+        )
 
 
 def _coerce_rated_dimension(value: Any) -> Any:
@@ -367,6 +587,26 @@ class SceneAnalysis(BaseModel):
     def _sanitize_recommendations(cls, value: Any) -> list[Any]:
         return _sanitize_recommendations(value)
 
+    @field_validator("effectiveness", mode="before")
+    @classmethod
+    def _coerce_effectiveness(cls, value: Any) -> CategoricalRating:
+        return _coerce_closed_enum(
+            value,
+            CategoricalRating,
+            default=CategoricalRating.AVERAGE,
+            synonyms=_CATEGORICAL_RATING_SYNONYMS,
+        )
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _coerce_confidence(cls, value: Any) -> Confidence:
+        return _coerce_closed_enum(
+            value,
+            Confidence,
+            default=Confidence.MEDIUM,
+            synonyms=_CONFIDENCE_SYNONYMS,
+        )
+
 
 class RootCause(BaseModel):
     factor: str
@@ -383,6 +623,44 @@ class RootCause(BaseModel):
         if isinstance(value, list):
             return value
         return [value]
+
+    @field_validator("estimated_impact", mode="before")
+    @classmethod
+    def _coerce_impact(cls, value: Any) -> Impact:
+        return _coerce_closed_enum(
+            value,
+            Impact,
+            default=Impact.MEDIUM,
+            synonyms=_IMPACT_SYNONYMS,
+        )
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _coerce_confidence(cls, value: Any) -> Confidence:
+        return _coerce_closed_enum(
+            value,
+            Confidence,
+            default=Confidence.MEDIUM,
+            synonyms=_CONFIDENCE_SYNONYMS,
+        )
+
+    @field_validator("factor", mode="before")
+    @classmethod
+    def _coerce_factor(cls, value: Any) -> str:
+        return _coerce_required_text(
+            value,
+            fallback="Unspecified root cause factor.",
+            field_name="RootCause.factor",
+        )
+
+    @field_validator("explanation", mode="before")
+    @classmethod
+    def _coerce_explanation(cls, value: Any) -> str:
+        return _coerce_required_text(
+            value,
+            fallback="Root cause explanation not provided.",
+            field_name="RootCause.explanation",
+        )
 
 
 class ExecutiveSummary(BaseModel):

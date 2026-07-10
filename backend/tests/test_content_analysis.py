@@ -238,3 +238,89 @@ class TestContentAnalysisFlows:
         resp = client.post("/api/analytics/videos/lk-002/analyze?force=true")
         assert resp.status_code == 400
         assert "media" in resp.json()["detail"].lower()
+
+    def test_enum_synonym_and_default_coercion(self, caplog: pytest.LogCaptureFixture):
+        from app.models.content_analysis import (
+            RatedDimension,
+            CategoricalRating,
+            Confidence,
+            Evidence,
+            EvidenceSource,
+            RootCause,
+            Impact,
+        )
+
+        # 1. RatedDimension rating and confidence synonyms/defaults
+        dim = RatedDimension.model_validate({
+            "rating": "solid",
+            "score": 7,
+            "confidence": "certain",
+            "explanation": "Valid explanation.",
+        })
+        assert dim.rating == CategoricalRating.GOOD
+        assert dim.confidence == Confidence.HIGH
+
+        dim_garbage = RatedDimension.model_validate({
+            "rating": "garbage-rating-value",
+            "score": 4,
+            "confidence": "garbage-confidence-value",
+            "explanation": "Valid explanation.",
+        })
+        assert dim_garbage.rating == CategoricalRating.AVERAGE
+        assert dim_garbage.confidence == Confidence.MEDIUM
+        assert any("content_analysis.enum_defaulted" in r.message for r in caplog.records)
+
+        # 2. Evidence source synonyms/defaults
+        caplog.clear()
+        ev = Evidence.model_validate({
+            "source": "retention_curve",
+            "description": "Evidence description",
+        })
+        assert ev.source == EvidenceSource.RETENTION
+
+        ev_garbage = Evidence.model_validate({
+            "source": "some-junk-source",
+            "description": "Evidence description",
+        })
+        assert ev_garbage.source == EvidenceSource.METRICS
+        assert any("content_analysis.enum_defaulted" in r.message for r in caplog.records)
+
+        # 3. RootCause impact and confidence synonyms/defaults
+        caplog.clear()
+        rc = RootCause.model_validate({
+            "factor": "High load",
+            "estimated_impact": "severe",
+            "confidence": "tentative",
+            "explanation": "Due to load.",
+            "evidence": [{"source": "metrics", "description": "High cpu"}],
+        })
+        assert rc.estimated_impact == Impact.HIGH
+        assert rc.confidence == Confidence.LOW
+
+        rc_garbage = RootCause.model_validate({
+            "factor": "High load",
+            "estimated_impact": "junk-impact",
+            "confidence": "junk-confidence",
+            "explanation": "Due to load.",
+            "evidence": [{"source": "metrics", "description": "High cpu"}],
+        })
+        assert rc_garbage.estimated_impact == Impact.MEDIUM
+        assert rc_garbage.confidence == Confidence.MEDIUM
+        assert any("content_analysis.enum_defaulted" in r.message for r in caplog.records)
+
+    def test_required_text_hardening(self, caplog: pytest.LogCaptureFixture):
+        from app.models.content_analysis import RootCause, Evidence, EvidenceSource
+
+        # Test RootCause string/null/empty coercion
+        rc = RootCause.model_validate({
+            "factor": "",  # empty
+            "estimated_impact": "high",
+            "confidence": "medium",
+            "explanation": None,  # null
+            "evidence": [{"source": "metrics", "description": 12345}],  # non-string description
+        })
+        assert rc.factor == "Unspecified root cause factor."
+        assert rc.explanation == "Root cause explanation not provided."
+        assert rc.evidence[0].description == "12345"
+        assert any("content_analysis.text_defaulted" in r.message for r in caplog.records)
+        assert any("content_analysis.text_normalized" in r.message for r in caplog.records)
