@@ -52,7 +52,7 @@ export function VoiceoverScriptPanel({ lines, className }: VoiceoverScriptPanelP
             <div className="text-sm text-muted-foreground">
               {lines.length} line{lines.length === 1 ? "" : "s"} · ~{duration}s speaking time
             </div>
-            <Button type="button" variant="secondary" size="sm" onClick={copy}>
+            <Button type="button" variant="outline" size="sm" onClick={copy}>
               <Copy className="h-4 w-4" />
               {copied ? "Copied" : "Copy script"}
             </Button>

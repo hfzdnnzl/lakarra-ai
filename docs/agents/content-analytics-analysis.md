@@ -158,9 +158,9 @@ Missing duration, completion, link-click, or zero-view inputs are reported in
 
 ## Pass 1: Metrics analysis
 
-**Agent method:** `ContentAnalystAgent._run_metrics_pass()`  
-**Prompt:** `content_analyst/metrics`  
-**LLM:** Text provider (`LLM_PROVIDER`)  
+**Agent method:** `ContentAnalystAgent._run_metrics_pass()`
+**Prompt:** `content_analyst/metrics`
+**LLM:** Text provider (`LLM_PROVIDER`)
 **Validates to:** `MetricsPassOutput` (internal)
 
 ### Input variables
@@ -180,9 +180,9 @@ engagement only (views, likes, comments, shares, saves).
 
 ## Pass 2: Visual analysis
 
-**Agent method:** `ContentAnalystAgent.analyze_visual_content()`  
-**Prompts:** `content_analyst/visual/video` or `content_analyst/visual/image`  
-**Service:** `ContentVisualAnalysisService` (Gemini / OpenAI / mock)  
+**Agent method:** `ContentAnalystAgent.analyze_visual_content()`
+**Prompts:** `content_analyst/visual/video` or `content_analyst/visual/image`
+**Service:** `ContentVisualAnalysisService` (Gemini / OpenAI / mock)
 **Validates to:** `VisualPassOutput` (internal)
 
 Runs after `resolve_media_source()` returns bytes (upload priority, then TikTok download).

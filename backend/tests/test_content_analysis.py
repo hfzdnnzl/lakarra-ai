@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.agents.content_analyst import ContentAnalystAgent
@@ -14,7 +15,6 @@ from app.models.content_analysis import ContentType
 from app.providers import MockTikTokProvider, build_internal_content_provider
 from app.repositories.analytics_repository import AnalyticsRepository
 from app.services.analytics_service import AnalyticsService
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -241,13 +241,13 @@ class TestContentAnalysisFlows:
 
     def test_enum_synonym_and_default_coercion(self, caplog: pytest.LogCaptureFixture):
         from app.models.content_analysis import (
-            RatedDimension,
             CategoricalRating,
             Confidence,
             Evidence,
             EvidenceSource,
-            RootCause,
             Impact,
+            RatedDimension,
+            RootCause,
         )
 
         # 1. RatedDimension rating and confidence synonyms/defaults
@@ -309,7 +309,7 @@ class TestContentAnalysisFlows:
         assert any("content_analysis.enum_defaulted" in r.message for r in caplog.records)
 
     def test_required_text_hardening(self, caplog: pytest.LogCaptureFixture):
-        from app.models.content_analysis import RootCause, Evidence, EvidenceSource
+        from app.models.content_analysis import RootCause
 
         # Test RootCause string/null/empty coercion
         rc = RootCause.model_validate({
@@ -326,7 +326,7 @@ class TestContentAnalysisFlows:
         assert any("content_analysis.text_normalized" in r.message for r in caplog.records)
 
     def test_root_cause_factor_alias_mapping_and_defaults(self):
-        from app.models.content_analysis import RootCause, Impact, Confidence
+        from app.models.content_analysis import RootCause
 
         # 1. Test factor resolves from 'text' or other alias when missing
         rc = RootCause.model_validate({
@@ -385,4 +385,3 @@ class TestContentAnalysisFlows:
         assert len(section.root_causes) == 2
         assert section.root_causes[0].factor == "Visual fatigue"
         assert section.root_causes[1].factor == "Intro transitions are too abrupt."
-

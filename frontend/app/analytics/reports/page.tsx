@@ -8,6 +8,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import type { HistoricalAnalytics } from "@/types";
 
+type HistoricalDisplayRecord = {
+  id: string;
+  video_id?: string;
+  handle?: string;
+  period?: string;
+  content_id?: string;
+  subject_id?: string;
+  metric?: string;
+  version?: number;
+  agent?: string;
+  payload?: Record<string, unknown>;
+  created_at?: string;
+};
+
+function toDisplayRecord(record: object): HistoricalDisplayRecord {
+  return record as HistoricalDisplayRecord;
+}
+
 export default function HistoricalReportsPage() {
   const [data, setData] = useState<HistoricalAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,18 +80,20 @@ export default function HistoricalReportsPage() {
             }`}
           >
             {t.label}
-            {data ? ` (${(data[t.key] as unknown[]).length})` : ""}
+            {data ? ` (${data[t.key].length})` : ""}
           </button>
         ))}
       </div>
 
       {!data ? (
         <p className="text-muted-foreground">Loading…</p>
-      ) : (records as unknown[]).length === 0 ? (
+      ) : records.length === 0 ? (
         <EmptyState message="No records in this category yet." />
       ) : (
         <div className="space-y-3">
-          {(records as Array<Record<string, unknown>>).map((r) => (
+          {records.map((record) => {
+            const r = toDisplayRecord(record);
+            return (
             <Card key={String(r.id)}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -97,7 +117,8 @@ export default function HistoricalReportsPage() {
                 ) : null}
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
     </>

@@ -12,6 +12,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -23,10 +24,12 @@ from ..models.analytics import (
     CompetitorAccountData,
     PerformanceMetrics,
     PostInfo,
-    VideoInfo,
     normalize_tiktok_handle,
 )
 from ..models.content_types import ContentType
+
+if TYPE_CHECKING:
+    from ..models.content_analysis import CarouselMedia
 
 logger = logging.getLogger("lakarra.tiktok_live")
 
@@ -362,7 +365,9 @@ def download_tiktok_carousel(handle: str, post_id: str) -> CarouselMedia | None:
                 )
             raw = response.content
             if len(raw) > max_bytes:
-                raise TikTokFetchError(f"TikTok carousel image exceeds max size ({max_bytes} bytes).")
+                raise TikTokFetchError(
+                    f"TikTok carousel image exceeds max size ({max_bytes} bytes)."
+                )
             mime_type = (
                 response.headers.get("content-type", "image/jpeg").split(";")[0].strip()
                 or "image/jpeg"
