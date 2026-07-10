@@ -35,6 +35,32 @@ def analytics_service(db_session: Session, analyst: ContentAnalystAgent):
 
 
 class TestContentAnalysisFlows:
+    def test_metrics_dimensions_accept_llm_scalar_shorthand(self):
+        from app.models.content_analysis import VideoContentAnalysisSection
+
+        section = VideoContentAnalysisSection(
+            type="VIDEO",
+            hook="The hook loses curiosity too early.",
+            story_script={"score": 0.6, "explanation": "Story is inferred from completion."},
+            voiceover={"score": 5, "confidence": "medium", "explanation": "Limited evidence."},
+            pacing="Pacing appears inconsistent.",
+            scenes=[
+                {
+                    "start": 0,
+                    "end": 3,
+                    "scene": {"description": "Opening hook"},
+                }
+            ],
+        )
+
+        assert section.hook.score == 5
+        assert section.story_script.score == 6
+        assert section.voiceover.score == 5
+        assert section.pacing.explanation == "Pacing appears inconsistent."
+        assert section.scenes[0].start_timestamp == "0"
+        assert section.scenes[0].end_timestamp == "3"
+        assert section.scenes[0].purpose == "Opening hook"
+
     def test_video_metrics_only(self, analytics_service: AnalyticsService):
         resp = analytics_service.analyze_content("lk-001", force=True)
         assert resp.success is True

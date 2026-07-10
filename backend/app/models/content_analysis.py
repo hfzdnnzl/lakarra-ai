@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .content_types import ContentType
 
@@ -162,6 +162,100 @@ class RatedDimension(BaseModel):
         return _coerce_str_list(value)
 
 
+def _coerce_rated_dimension(value: Any) -> Any:
+    """Normalize common LLM shorthand into the rich dimension shape."""
+    if isinstance(value, RatedDimension):
+        return value
+    if isinstance(value, str):
+        return {
+            "rating": CategoricalRating.AVERAGE,
+            "score": 5,
+            "confidence": Confidence.LOW,
+            "explanation": value,
+        }
+    if isinstance(value, (int, float)):
+        score = round(float(value) * 10) if 0 <= value <= 1 else round(float(value))
+        return {
+            "rating": CategoricalRating.GOOD if score >= 7 else CategoricalRating.AVERAGE,
+            "score": max(1, min(10, score)),
+            "confidence": Confidence.LOW,
+            "explanation": "Score supplied without supporting dimension detail.",
+        }
+    if isinstance(value, dict):
+        normalized = dict(value)
+        if "score" in normalized and "rating" not in normalized:
+            score = float(normalized["score"])
+            if 0 <= score <= 1:
+                score = round(score * 10)
+            normalized["score"] = max(1, min(10, round(score)))
+            normalized["rating"] = (
+                CategoricalRating.GOOD if normalized["score"] >= 7 else CategoricalRating.AVERAGE
+            )
+        normalized.setdefault("confidence", Confidence.LOW)
+        normalized.setdefault("explanation", "Dimension detail supplied without an explanation.")
+        return normalized
+    return value
+
+
+def _coerce_scene(value: Any) -> Any:
+    """Normalize common LLM scene aliases into ``SceneAnalysis`` fields."""
+    if isinstance(value, str):
+        return {
+            "start_timestamp": "",
+            "end_timestamp": "",
+            "purpose": value,
+            "effectiveness": CategoricalRating.AVERAGE,
+            "score": 5,
+            "confidence": Confidence.LOW,
+            "explanation": value,
+            "recommendations": [],
+        }
+    if not isinstance(value, dict):
+        return value
+
+    normalized = dict(value)
+    normalized.setdefault(
+        "start_timestamp",
+        normalized.get("start_time", normalized.get("start", "")),
+    )
+    normalized.setdefault(
+        "end_timestamp",
+        normalized.get("end_time", normalized.get("end", "")),
+    )
+    normalized["start_timestamp"] = str(normalized["start_timestamp"])
+    normalized["end_timestamp"] = str(normalized["end_timestamp"])
+    normalized.setdefault(
+        "purpose",
+        normalized.get("scene", normalized.get("description", "")),
+    )
+    purpose = normalized["purpose"]
+    if isinstance(purpose, dict):
+        normalized["purpose"] = str(
+            purpose.get("description")
+            or purpose.get("name")
+            or purpose.get("text")
+            or purpose
+        )
+    elif isinstance(purpose, list):
+        normalized["purpose"] = "; ".join(str(item) for item in purpose)
+    elif purpose is None:
+        normalized["purpose"] = ""
+    elif not isinstance(purpose, str):
+        normalized["purpose"] = str(purpose)
+    normalized.setdefault("effectiveness", CategoricalRating.AVERAGE)
+    normalized.setdefault("score", 5)
+    normalized.setdefault("confidence", Confidence.LOW)
+    normalized.setdefault(
+        "explanation",
+        normalized.get("purpose", "Scene detail supplied without an explanation."),
+    )
+    normalized.setdefault("recommendations", [])
+    score = normalized.get("score")
+    if isinstance(score, (int, float)) and 0 <= score <= 1:
+        normalized["score"] = round(score * 10)
+    return normalized
+
+
 class SceneAnalysis(BaseModel):
     start_timestamp: str
     end_timestamp: str
@@ -207,6 +301,18 @@ class VideoContentAnalysisSection(BaseModel):
     scenes: list[SceneAnalysis] = Field(default_factory=list)
     pacing: RatedDimension
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_dimensions(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            value = dict(value)
+            for field_name in ("hook", "story_script", "voiceover", "pacing"):
+                if field_name in value:
+                    value[field_name] = _coerce_rated_dimension(value[field_name])
+            if "scenes" in value and isinstance(value["scenes"], list):
+                value["scenes"] = [_coerce_scene(scene) for scene in value["scenes"]]
+        return value
+
 
 class ImageContentAnalysisSection(BaseModel):
     type: Literal["IMAGE"] = "IMAGE"
@@ -219,6 +325,26 @@ class ImageContentAnalysisSection(BaseModel):
     visual_appeal: RatedDimension
     color_harmony: RatedDimension
     scroll_stopping_potential: RatedDimension
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_dimensions(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            value = dict(value)
+            for field_name in (
+                "composition",
+                "typography",
+                "visual_hierarchy",
+                "branding",
+                "message_clarity",
+                "call_to_action",
+                "visual_appeal",
+                "color_harmony",
+                "scroll_stopping_potential",
+            ):
+                if field_name in value:
+                    value[field_name] = _coerce_rated_dimension(value[field_name])
+        return value
 
 
 class CarouselPageAnalysis(BaseModel):
@@ -234,6 +360,25 @@ class CarouselPageAnalysis(BaseModel):
     cta_visibility: RatedDimension
     emotional_appeal: RatedDimension
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_dimensions(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            value = dict(value)
+            for field_name in (
+                "composition",
+                "typography",
+                "readability",
+                "branding",
+                "color_harmony",
+                "whitespace",
+                "cta_visibility",
+                "emotional_appeal",
+            ):
+                if field_name in value:
+                    value[field_name] = _coerce_rated_dimension(value[field_name])
+        return value
+
 
 class CarouselContentAnalysisSection(BaseModel):
     type: Literal["CAROUSEL"] = "CAROUSEL"
@@ -244,6 +389,23 @@ class CarouselContentAnalysisSection(BaseModel):
     swipe_engagement: RatedDimension
     cta_effectiveness: RatedDimension
     overall_flow: RatedDimension
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_dimensions(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            value = dict(value)
+            for field_name in (
+                "cover_slide",
+                "story_progression",
+                "design_consistency",
+                "swipe_engagement",
+                "cta_effectiveness",
+                "overall_flow",
+            ):
+                if field_name in value:
+                    value[field_name] = _coerce_rated_dimension(value[field_name])
+        return value
 
 
 ContentAnalysisSectionUnion = Annotated[
