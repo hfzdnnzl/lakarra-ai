@@ -14,6 +14,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .content_intelligence import PerformanceSignalSet
 from .content_types import ContentType
 
 __all__ = ["ContentType"]
@@ -954,6 +955,12 @@ class PerformanceAnalysisSection(BaseModel):
     metrics: PerformanceMetrics
     engagement: EngagementMetrics
     performance_summary: str
+    signals: PerformanceSignalSet = Field(default_factory=PerformanceSignalSet)
+
+
+class AnalysisInputsSummary(BaseModel):
+    metrics: PerformanceMetrics
+    signals: PerformanceSignalSet = Field(default_factory=PerformanceSignalSet)
 
 
 class PerformanceDiagnosisSection(BaseModel):
@@ -1049,6 +1056,7 @@ class ContentAnalysisSummary(BaseModel):
     experiments: list[Recommendation] = Field(default_factory=list)
     future_content_ideas: list[Recommendation] = Field(default_factory=list)
     performance_summary: str = ""
+    analysis_inputs: AnalysisInputsSummary
     analysis_mode: Literal["full", "metrics_only"] = "metrics_only"
     visual_provider: str | None = None
 

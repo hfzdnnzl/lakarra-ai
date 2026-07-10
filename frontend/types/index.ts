@@ -439,6 +439,20 @@ export interface RootCause {
   evidence: Evidence[];
 }
 
+export interface PerformanceSignal {
+  name: string;
+  value: number | null;
+  unit: string;
+  available: boolean;
+  evidence?: Evidence | null;
+}
+
+export interface AnalysisInputs {
+  metrics: VideoMetrics;
+  signals: PerformanceSignal[];
+  unavailable_signals: string[];
+}
+
 export interface ContentAnalysisSummary {
   content_type: ContentType;
   executive_summary: ExecutiveSummary;
@@ -449,6 +463,7 @@ export interface ContentAnalysisSummary {
   experiments: Recommendation[];
   future_content_ideas: Recommendation[];
   performance_summary: string;
+  analysis_inputs?: AnalysisInputs;
   analysis_mode: "full" | "metrics_only";
   visual_provider?: string | null;
 }

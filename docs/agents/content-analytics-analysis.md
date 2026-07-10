@@ -2,7 +2,13 @@
 
 This document describes the unified `ContentAnalysis` domain model produced when you click
 **Analyze** on a post in **Analytics → Content**. Both **VIDEO** and **IMAGE** TikTok posts
-use the same two-pass pipeline with type-specific content sections and visual prompts.
+use the same typed analysis contracts, deterministic performance signal layer, metrics pass,
+and type-specific visual prompts.
+
+The current implementation is the first slice of the Content Intelligence foundation. It
+makes performance facts and analyst inputs explicit; causal synthesis, Content DNA, historical
+learning, and competitor intelligence are represented by domain contracts and are being added
+incrementally.
 
 ---
 
@@ -15,12 +21,12 @@ flowchart TD
     B[Load catalog post + user metrics]
     C{Required metrics complete?}
     C -->|No| X[Error: MetricsIncompleteError]
-    C -->|Yes| D[Pass 1: MetricsPassOutput LLM]
-    D --> E{Media bytes available?}
-    E -->|Yes| F[Pass 2: VisualPassOutput LLM]
-    E -->|No| G[Skip visual pass]
-    F --> H[merge_passes]
-    G --> H
+    C -->|Yes| D{Analysis media available?}
+    D -->|No| Y[Error: MissingMediaError]
+    D -->|Yes| E[Build deterministic performance signals]
+    E --> F[Pass 1: MetricsPassOutput LLM]
+    F --> G[Pass 2: VisualPassOutput LLM]
+    G --> H[merge_passes]
     H --> I[ContentAnalysis persisted + returned]
     A1 --> B
     A2 --> B
@@ -36,20 +42,23 @@ request body for plan linking.
 
 | Mode | When |
 |------|------|
-| `metrics_only` | No media file resolved |
-| `full` | Upload or TikTok download succeeded |
+| `full` | Metrics are complete and upload or TikTok media resolved |
+| `metrics_only` | Legacy/alternate projection; the single-post analysis endpoint requires media |
 
 **Key source files:**
 
 | Area | Path |
 |------|------|
 | Domain model | `backend/app/models/content_analysis.py` |
+| Intelligence contracts | `backend/app/models/content_intelligence.py` |
 | Content types | `backend/app/models/content_types.py` |
 | Input builder | `backend/app/agents/content_analyst/input_builder.py` |
 | Orchestration | `backend/app/services/analytics_service.py` |
 | Media resolution | `backend/app/services/media_resolver.py` |
 | Visual analysis | `backend/app/services/content_visual_analysis.py` |
 | Performance injection | `backend/app/services/performance_analysis_builder.py` |
+| Deterministic signals | `backend/app/services/content_intelligence/performance.py` |
+| Recommendation ranking | `backend/app/services/content_intelligence/recommendations.py` |
 | Merge | `backend/app/services/analysis_merge.py` |
 | Agent | `backend/app/agents/content_analyst/agent.py` |
 | Metrics prompt | `backend/prompts/content_analyst/metrics/` |
@@ -84,6 +93,9 @@ ContentAnalysis
 └── metadata
 ```
 
+The `performance_analysis` section includes a structured `signals` field. The dashboard
+projection exposes these facts through `analysis_inputs`, described below.
+
 ### Type-specific `content_analysis`
 
 | Type | Model | Key fields |
@@ -100,6 +112,47 @@ ContentAnalysis
 | `SceneAnalysis` | Timestamp-bounded scene with effectiveness rating (VIDEO) |
 | `RootCause` | Ranked performance driver with `estimated_impact` and evidence |
 | `Recommendation` | Actionable item with required `evidence[]` |
+
+### Intelligence foundation contracts
+
+The new contracts live in `backend/app/models/content_intelligence.py` and keep observations,
+hypotheses, and recommendations distinguishable:
+
+| Contract | Purpose |
+|----------|---------|
+| `EvidenceRef` | Traceable metric, visual, historical, competitor, or user-input observation |
+| `ConfidenceScore` | Normalized 0–1 confidence with `high`, `medium`, `low`, or `hypothesis` band |
+| `CausalLink` / `CausalChain` | Signal → interpretation → behavioral consequence → outcome reasoning |
+| `PriorityScore` | Explicit expected impact, implementation effort, confidence, composite, and rank |
+| `IntelligenceRecommendation` | Action, reason, causal chain, evidence, expected metric, and measurement window |
+| `ContentDNA` | Named 0–100 dimensions with confidence and evidence |
+| `ContentPattern` | Multi-label content pattern with confidence and evidence |
+| `KnowledgeContext` | Historical/competitor sample counts, patterns, and unavailable signals |
+
+These contracts are available for the component-based intelligence pipeline. The current
+production path still uses the existing `RootCause` and `Recommendation` projection while the
+richer synthesis is wired into orchestration.
+
+## Deterministic performance signals
+
+`build_performance_signals()` calculates measurable ratios before LLM interpretation. It does
+not infer unsupported outcomes and records unavailable inputs separately.
+
+Current signals include:
+
+| Signal | Calculation |
+|--------|-------------|
+| `engagement_rate` | (likes + comments + shares + saves) / views |
+| `share_rate` | shares / views |
+| `save_rate` | saves / views |
+| `follower_conversion_rate` | followers gained / views |
+| `watch_duration_ratio` | average watch duration / video duration, when both exist |
+| `completion_rate` | Platform-reported completion rate, when available |
+| `link_click_rate` | link clicks / views, when link clicks are provided |
+
+Each available signal has an `EvidenceRef` with its source calculation and observed value.
+Missing duration, completion, link-click, or zero-view inputs are reported in
+`unavailable_signals` rather than converted into fabricated values.
 
 ---
 
@@ -125,14 +178,16 @@ engagement only (views, likes, comments, shares, saves).
 
 ---
 
-## Pass 2: Visual analysis (conditional)
+## Pass 2: Visual analysis
 
 **Agent method:** `ContentAnalystAgent.analyze_visual_content()`  
 **Prompts:** `content_analyst/visual/video` or `content_analyst/visual/image`  
 **Service:** `ContentVisualAnalysisService` (Gemini / OpenAI / mock)  
 **Validates to:** `VisualPassOutput` (internal)
 
-Runs when `resolve_media_source()` returns bytes (upload priority, then TikTok download).
+Runs after `resolve_media_source()` returns bytes (upload priority, then TikTok download).
+The single-post analysis endpoint fails with `MissingMediaError` when no media is available;
+visual analysis is not silently skipped.
 
 | Provider | VIDEO strategy | IMAGE strategy |
 |----------|---------------|----------------|
@@ -153,6 +208,11 @@ Runs when `resolve_media_source()` returns bytes (upload priority, then TikTok d
 | `executive_summary` | Synthesized from root causes + dimensions | Same logic, image dimension labels |
 | `performance_diagnosis` | Merged, deduped root causes | Same |
 | `recommendations` | Grouped immediate / experiments / future | Same |
+
+The deterministic recommendation service is available at
+`backend/app/services/content_intelligence/recommendations.py`. It ranks typed intelligence
+recommendations using explicit impact, effort, and confidence factors. It is not yet the
+replacement for the existing LLM recommendation projection in the final merge path.
 
 ---
 
@@ -198,7 +258,21 @@ Each `ContentCatalogItem.analysis` includes:
 | `content_type` | `VIDEO` | `IMAGE` |
 | `content_ratings` | Hook, pacing, story, voiceover | Composition, CTA, branding, etc. |
 | `scenes` | Scene timeline | Empty |
+| `analysis_inputs` | Exact saved metrics and derived signals | Same |
 | `analysis_mode` | `full` / `metrics_only` | Same |
+
+### `analysis_inputs`
+
+The dashboard's expandable **Analysis inputs** section shows the exact values used by the
+analysis contract, including:
+
+- Views, likes, comments, shares, saves, reach, watch time, and average watch duration
+- Completion rate, profile visits, followers gained, and link clicks
+- Derived performance signals and their evidence descriptions
+- Signals that were unavailable because the required source data was missing
+
+The same metrics remain editable in the card and are saved through `updateVideoMetrics`. This
+keeps the visible user inputs aligned with the values passed to the analyst.
 
 ---
 
@@ -222,7 +296,31 @@ To add a new content type (e.g. carousel):
 3. Add provider branch in `ContentVisualAnalysisService`
 4. Add one `merge_passes` branch for carousel section merge
 
-The pipeline (`ContentAnalysisInput` → metrics pass → visual pass → merge) stays fixed.
+The current pipeline is:
+
+`ContentAnalysisInput` → deterministic performance signals → metrics pass → visual pass → merge
+
+Future content types should also provide an intelligence adapter for signals, Content DNA,
+patterns, and scene-level observations without changing the core orchestration.
+
+## Implementation status
+
+Implemented:
+
+- Typed evidence, confidence, causal-chain, priority, Content DNA, pattern, and knowledge-context contracts
+- Deterministic performance signal calculation with explicit unavailable-signal tracking
+- Deterministic recommendation priority calculation
+- `analysis_inputs` dashboard projection
+- Editable metric transparency in the analytics card
+- Regression tests for contracts, signal calculations, ranking, merge behavior, and analytics integration
+
+Next foundation slices:
+
+- Wire the richer intelligence contracts into analyst orchestration and final synthesis
+- Persist normalized Content DNA, pattern, and historical feature records
+- Add historical and competitor comparison context
+- Add scene intelligence and experiment backlog projections
+- Defer actual content rewrites and trained prediction models until the Content Creator and data-volume contracts are ready
 
 ---
 

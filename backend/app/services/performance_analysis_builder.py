@@ -6,6 +6,7 @@ from ..models.analytics import EngagementMetrics, PerformanceMetrics
 from ..models.content_analysis import PerformanceAnalysisSection
 from ..models.content_types import ContentType
 from ..providers import TikTokVideoData
+from .content_intelligence.performance import build_performance_signals
 from .content_metrics import apply_metrics_to_performance, metrics_from_row
 
 
@@ -77,4 +78,8 @@ def build_performance_analysis(
         metrics=performance,
         engagement=engagement,
         performance_summary=summary,
+        signals=build_performance_signals(
+            performance,
+            duration_seconds=post_data.video.duration,
+        ),
     )

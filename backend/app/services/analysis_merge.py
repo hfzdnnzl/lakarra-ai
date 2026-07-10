@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from ..models.content_analysis import (
+    AnalysisInputsSummary,
     AnalysisMetadata,
     CategoricalRating,
     Confidence,
@@ -260,6 +261,10 @@ def project_content_analysis_summary(analysis: ContentAnalysis) -> ContentAnalys
         experiments=analysis.recommendations.experiments,
         future_content_ideas=analysis.recommendations.future_content_ideas,
         performance_summary=analysis.performance_analysis.performance_summary,
+        analysis_inputs=AnalysisInputsSummary(
+            metrics=analysis.performance_analysis.metrics,
+            signals=analysis.performance_analysis.signals,
+        ),
         analysis_mode=analysis.metadata.analysis_mode,
         visual_provider=visual_provider,
     )

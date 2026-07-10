@@ -68,6 +68,21 @@ function formatRating(rating: string) {
   return rating.charAt(0).toUpperCase() + rating.slice(1);
 }
 
+const analysisMetricFields = [
+  "views",
+  "likes",
+  "comments",
+  "shares",
+  "saves",
+  "reach",
+  "watch_time",
+  "average_watch_duration",
+  "completion_rate",
+  "profile_visits",
+  "followers_gained",
+  "link_clicks",
+] as const;
+
 function EvidenceList({ items }: { items: { source: string; description: string }[] }) {
   if (!items.length) return null;
   return (
@@ -92,6 +107,12 @@ export function VideoAnalyticsCard({
   const label = videoDisplayLabel(video);
   const isImage = video.content_type === "IMAGE";
   const hasUpload = video.has_media_upload ?? video.has_video_upload ?? false;
+  const analysisInputs = video.analysis?.analysis_inputs;
+  const analysisMetrics = analysisInputs?.metrics;
+  const analysisSignals = Array.isArray(analysisInputs?.signals) ? analysisInputs.signals : [];
+  const unavailableSignals = Array.isArray(analysisInputs?.unavailable_signals)
+    ? analysisInputs.unavailable_signals
+    : [];
   const [expanded, setExpanded] = useState(expandAll ?? false);
   const [editing, setEditing] = useState(() => !hasSavedMetrics(video.metrics));
   const [form, setForm] = useState(() => cloneMetrics(video.metrics));
@@ -516,6 +537,52 @@ export function VideoAnalyticsCard({
                   <p className="mt-2 text-sm text-muted-foreground">{video.analysis.performance_summary}</p>
                 </details>
               ) : null}
+
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer font-medium">Analysis inputs</summary>
+                {analysisInputs ? (
+                  <div className="mt-3 space-y-3">
+                    <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
+                      {analysisMetricFields.map((field) => (
+                        <div key={field} className="rounded-md bg-muted/40 px-3 py-2">
+                          <div className="text-xs text-muted-foreground">{field.replaceAll("_", " ")}</div>
+                          <div className="text-sm font-medium">
+                            {formatMetricDisplay(field, analysisMetrics?.[field] ?? null)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {analysisSignals.length > 0 ? (
+                      <div>
+                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Derived signals
+                        </div>
+                        <ul className="space-y-2 text-sm">
+                          {analysisSignals.map((signal) => (
+                            <li key={signal.name}>
+                              <span className="font-medium">{signal.name.replaceAll("_", " ")}</span>
+                              {signal.value !== null ? `: ${signal.value}` : ": unavailable"}
+                              {signal.evidence?.description ? (
+                                <p className="text-xs text-muted-foreground">{signal.evidence.description}</p>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {unavailableSignals.length > 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Unavailable: {unavailableSignals.join(", ")}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Detailed analysis inputs are unavailable for this older analysis. Re-analyze
+                    the post to capture them.
+                  </p>
+                )}
+              </details>
             </>
           ) : null}
 
