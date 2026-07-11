@@ -92,6 +92,42 @@ def _video_meta_from_payload(payload: dict) -> dict:
     return {}
 
 
+def _account_to_dict(account: TikTokAccountData) -> dict:
+    """Serialize a TikTokAccountData dataclass into a JSON-safe dict."""
+    return {
+        "handle": account.handle,
+        "follower_count": account.follower_count,
+        "videos": [
+            {
+                "video": v.video.model_dump(),
+                "performance": v.performance.model_dump(),
+                "comments": v.comments,
+                "download_url": v.download_url,
+            }
+            for v in account.videos
+        ],
+    }
+
+
+def _account_from_dict(data: dict) -> TikTokAccountData:
+    """Reconstruct a TikTokAccountData dataclass from a dict (see _account_to_dict)."""
+    from ..models.analytics import PerformanceMetrics, VideoInfo
+
+    return TikTokAccountData(
+        handle=data["handle"],
+        follower_count=data.get("follower_count", 0),
+        videos=[
+            TikTokVideoData(
+                video=VideoInfo(**v["video"]),
+                performance=PerformanceMetrics(**v["performance"]),
+                comments=v.get("comments", []),
+                download_url=v.get("download_url", ""),
+            )
+            for v in data.get("videos", [])
+        ],
+    )
+
+
 class AnalyticsService:
     def __init__(
         self,
@@ -659,7 +695,38 @@ class AnalyticsService:
 
     def get_content_page(self) -> ContentAnalyticsPage:
         settings = self.get_account_settings()
-        labels = {
+        labels = self._page_labels()
+        if not settings.configured or not settings.tiktok_handle:
+            return self._empty_page(None, labels)
+
+        handle = settings.tiktok_handle
+
+        # Try to serve from cached DB snapshot — avoids a live TikTok API call.
+        snapshot = self.repo.get_snapshot()
+        if snapshot is not None:
+            try:
+                account = _account_from_dict(snapshot)
+                return self._build_page_from_account(handle, account, labels)
+            except Exception:
+                logger.warning("get_content_page.snapshot_parse_failed", exc_info=True)
+                # Fall through to live fetch if snapshot is corrupt.
+
+        # No snapshot yet — fetch from TikTok, cache it, then serve.
+        return self._fetch_and_cache_page(handle, labels)
+
+    def refresh_content_page(self) -> ContentAnalyticsPage:
+        """Force a live TikTok fetch, update the DB snapshot, and return the page."""
+        settings = self.get_account_settings()
+        labels = self._page_labels()
+        if not settings.configured or not settings.tiktok_handle:
+            return self._empty_page(None, labels)
+        return self._fetch_and_cache_page(settings.tiktok_handle, labels)
+
+    # -- helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _page_labels() -> dict:
+        return {
             "required_field_labels": {
                 k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
             },
@@ -667,30 +734,36 @@ class AnalyticsService:
                 k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
             },
         }
-        if not settings.configured or not settings.tiktok_handle:
-            overview = AccountOverview(tiktok_handle=None, account_configured=False)
-            return ContentAnalyticsPage(
-                overview=overview,
-                readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
-                videos=[],
-                **labels,
-            )
 
-        handle = settings.tiktok_handle
+    def _empty_page(self, handle: str | None, labels: dict) -> ContentAnalyticsPage:
+        overview = AccountOverview(tiktok_handle=handle, account_configured=handle is not None)
+        return ContentAnalyticsPage(
+            overview=overview,
+            readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
+            videos=[],
+            **labels,
+        )
+
+    def _fetch_and_cache_page(self, handle: str, labels: dict) -> ContentAnalyticsPage:
+        """Fetch from TikTok API, persist snapshot, build and return the page."""
         account, live_data_error = self._fetch_account(handle)
         if account is None:
-            overview = AccountOverview(
-                tiktok_handle=handle,
-                account_configured=True,
-                live_data_error=live_data_error,
-            )
-            return ContentAnalyticsPage(
-                overview=overview,
-                readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
-                videos=[],
-                **labels,
-            )
+            return self._empty_page(handle, labels)
 
+        # Persist snapshot so subsequent loads skip the TikTok API call.
+        self.repo.save_snapshot(_account_to_dict(account))
+        self.session.commit()
+
+        return self._build_page_from_account(handle, account, labels, live_data_error=live_data_error)
+
+    def _build_page_from_account(
+        self,
+        handle: str,
+        account: TikTokAccountData,
+        labels: dict,
+        *,
+        live_data_error: str | None = None,
+    ) -> ContentAnalyticsPage:
         for video in account.videos:
             self._sync_public_metrics(handle, video)
         self.session.commit()

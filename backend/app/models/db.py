@@ -394,12 +394,20 @@ class MetricsSnapshotORM(TimestampMixin, Base):
 
 
 class AnalyticsAccountSettingsORM(TimestampMixin, Base):
-    """Singleton row storing the connected Lakarra TikTok account handle."""
+    """Singleton row storing the connected Lakarra TikTok account handle
+    and a cached snapshot of TikTok account data (videos, follower count, metrics).
+    The snapshot is populated on first fetch or explicit refresh; normal page loads
+    read from the snapshot rather than calling the TikTok API live.
+    """
 
     __tablename__ = "analytics_account_settings"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
     tiktok_handle: Mapped[str] = mapped_column(String(128), default="")
+    tiktok_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    tiktok_snapshot_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
 
 class VideoMetricsORM(TimestampMixin, Base):

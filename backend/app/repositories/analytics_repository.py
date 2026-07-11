@@ -40,6 +40,9 @@ class AnalyticsRepository:
             self.session.add(row)
         else:
             row.tiktok_handle = handle
+            # Clear cached snapshot when handle changes
+            row.tiktok_snapshot = None
+            row.tiktok_snapshot_fetched_at = None
         return row
 
     def _next_version(self, model: type, **filters) -> int:
@@ -420,3 +423,29 @@ class AnalyticsRepository:
             .limit(limit)
         )
         return list(self.session.scalars(stmt))
+
+    # --- TikTok account snapshot -------------------------------------------
+    def get_snapshot(self) -> dict | None:
+        """Return the cached TikTok account snapshot (JSON blob), or None."""
+        row = self.get_account_settings()
+        if row is None:
+            return None
+        return row.tiktok_snapshot
+
+    def get_snapshot_fetched_at(self):
+        """Return the datetime the snapshot was last fetched, or None."""
+        row = self.get_account_settings()
+        if row is None:
+            return None
+        return row.tiktok_snapshot_fetched_at
+
+    def save_snapshot(self, data: dict) -> None:
+        """Persist a TikTok account snapshot and update the fetched-at timestamp."""
+        from datetime import datetime, timezone
+
+        row = self.get_account_settings()
+        if row is None:
+            row = AnalyticsAccountSettingsORM(id="default")
+            self.session.add(row)
+        row.tiktok_snapshot = data
+        row.tiktok_snapshot_fetched_at = datetime.now(timezone.utc)

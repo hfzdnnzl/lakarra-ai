@@ -148,6 +148,8 @@ export const api = {
     }),
   analyticsOverview: () => request<import("@/types").AccountOverview>("/analytics/overview"),
   analyticsContent: () => request<import("@/types").ContentAnalyticsPage>("/analytics/content"),
+  analyticsContentRefresh: () =>
+    request<import("@/types").ContentAnalyticsPage>("/analytics/content/refresh", { method: "POST" }),
   analyticsMetricsReadiness: () =>
     request<import("@/types").MetricsReadiness>("/analytics/metrics/readiness"),
   updateVideoMetrics: (video_id: string, body: Record<string, unknown>) =>

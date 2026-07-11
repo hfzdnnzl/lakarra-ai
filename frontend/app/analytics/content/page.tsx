@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Loader2, Play } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Play, RefreshCw } from "lucide-react";
 
 import { useAnalyticsAccount } from "@/components/analytics/AnalyticsShell";
 import { PageHeader } from "@/components/page-header";
@@ -17,6 +17,7 @@ export default function ContentAnalyticsPage() {
   const [visualAnalysisProvider, setVisualAnalysisProvider] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [analyzeResult, setAnalyzeResult] = useState<string | null>(null);
   const [expandAll, setExpandAll] = useState(false);
 
@@ -76,6 +77,19 @@ export default function ContentAnalyticsPage() {
     });
   }, [page]);
 
+  const refreshFromTikTok = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const freshPage = await api.analyticsContentRefresh();
+      setPage(freshPage);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const ready = page?.readiness.ready ?? false;
 
   if (!configured) {
@@ -98,10 +112,20 @@ export default function ContentAnalyticsPage() {
         title="Content Analytics"
         description="Enter TikTok Studio metrics per post, upload the posted media for full visual analysis, then run AI analysis."
         action={
-          <Button onClick={analyzeAll} disabled={busy || !ready} size="sm">
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-            Analyze New Videos
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={refreshFromTikTok} disabled={refreshing} size="sm" variant="outline">
+              {refreshing ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 h-4 w-4" />
+              )}
+              Refresh from TikTok
+            </Button>
+            <Button onClick={analyzeAll} disabled={busy || !ready} size="sm">
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+              Analyze New Videos
+            </Button>
+          </div>
         }
       />
 

@@ -301,6 +301,21 @@ def get_content_analytics(service: AnalyticsService = Depends(_service)) -> Cont
         raise
 
 
+@router.post("/content/refresh", response_model=ContentAnalyticsPage)
+def refresh_content_analytics(
+    service: AnalyticsService = Depends(_service),
+) -> ContentAnalyticsPage:
+    """Force a live TikTok fetch, update the DB snapshot, and return the page."""
+    try:
+        return service.refresh_content_page()
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
+
+
 @router.get("/competitors", response_model=CompetitorOverview)
 def get_competitor_analytics(
     service: AnalyticsService = Depends(_service),
