@@ -180,13 +180,20 @@ export default function ContentAnalyticsPage() {
         </div>
       ) : null}
 
-      {loading || !page ? (
+      {!page ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           <span>Loading analytics data…</span>
         </div>
       ) : (
         <>
+          {loading ? (
+            <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Refreshing data…</span>
+            </div>
+          ) : null}
+
           <Card className={`mb-8 ${ready ? "border-emerald-200" : "border-amber-200"}`}>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Metrics readiness</CardTitle>
@@ -292,13 +299,6 @@ export default function ContentAnalyticsPage() {
               ) : null}
             </div>
           </div>
-
-          {loading && page ? (
-            <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Sorting and reloading data…</span>
-            </div>
-          ) : null}
 
           {videos.length === 0 ? (
             <p className="text-sm text-muted-foreground">
