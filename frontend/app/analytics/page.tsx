@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 import { useAnalyticsAccount } from "@/components/analytics/AnalyticsShell";
@@ -17,6 +17,25 @@ export default function AnalyticsOverviewPage() {
   const [metricsReady, setMetricsReady] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [trendPage, setTrendPage] = useState(1);
+  const TRENDS_PER_PAGE = 5;
+
+  // Reset trend page when overview changes (different account / refresh)
+  useEffect(() => {
+    setTrendPage(1);
+  }, [overview]);
+
+  const sortedTrends = useMemo(() => {
+    if (!overview) return [];
+    return [...overview.performance_trends].sort((a, b) =>
+      b.publish_date.localeCompare(a.publish_date),
+    );
+  }, [overview]);
+
+  const trendTotalPages = Math.max(1, Math.ceil(sortedTrends.length / TRENDS_PER_PAGE));
+  const trendStart = (trendPage - 1) * TRENDS_PER_PAGE;
+  const trendEnd = trendStart + TRENDS_PER_PAGE;
+  const paginatedTrends = sortedTrends.slice(trendStart, trendEnd);
 
   const load = useCallback(async () => {
     if (!configured) {
@@ -223,27 +242,58 @@ export default function AnalyticsOverviewPage() {
                 <CardTitle className="text-base">Performance Trends</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {overview.performance_trends.map((t) => (
-                  <div key={t.video_id} className="space-y-1">
-                    <div className="line-clamp-1 text-sm font-medium">
-                      {t.title ?? t.publish_date}
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="w-20 shrink-0 text-muted-foreground">{t.publish_date}</div>
-                      <div className="h-2 flex-1 rounded bg-muted">
-                        <div
-                          className="h-2 rounded bg-primary"
-                          style={{
-                            width: `${Math.min(100, (t.views / Math.max(...overview.performance_trends.map((x) => x.views), 1)) * 100)}%`,
-                          }}
-                        />
+                {paginatedTrends.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No trends yet.</p>
+                ) : (
+                  <>
+                    {paginatedTrends.map((t) => (
+                      <div key={t.video_id} className="space-y-1">
+                        <div className="line-clamp-1 text-sm font-medium">
+                          {t.title ?? t.publish_date}
+                        </div>
+                        <div className="flex items-center gap-3 text-sm">
+                          <div className="w-20 shrink-0 text-muted-foreground">{t.publish_date}</div>
+                          <div className="h-2 flex-1 rounded bg-muted">
+                            <div
+                              className="h-2 rounded bg-primary"
+                              style={{
+                                width: `${Math.min(100, (t.views / Math.max(...sortedTrends.map((x) => x.views), 1)) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                          <div className="w-16 text-right text-muted-foreground">
+                            {t.views >= 1000 ? `${(t.views / 1000).toFixed(1)}k` : t.views}
+                          </div>
+                        </div>
                       </div>
-                      <div className="w-16 text-right text-muted-foreground">
-                        {t.views >= 1000 ? `${(t.views / 1000).toFixed(1)}k` : t.views}
+                    ))}
+                    {trendTotalPages > 1 ? (
+                      <div className="flex items-center justify-between pt-2 text-sm">
+                        <span className="text-muted-foreground">
+                          {trendStart + 1}–{Math.min(trendEnd, sortedTrends.length)} of {sortedTrends.length}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+                            disabled={trendPage <= 1}
+                            onClick={() => setTrendPage((p) => Math.max(1, p - 1))}
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+                            disabled={trendPage >= trendTotalPages}
+                            onClick={() => setTrendPage((p) => Math.min(trendTotalPages, p + 1))}
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ))}
+                    ) : null}
+                  </>
+                )}
               </CardContent>
             </Card>
           </div>
