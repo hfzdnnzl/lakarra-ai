@@ -509,12 +509,22 @@ export interface MetricsReadiness {
   optional_recommended_for: string[];
 }
 
+export interface PaginationInfo {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  sort_by: string;
+  sort_order: string;
+}
+
 export interface ContentAnalyticsPage {
   overview: AccountOverview;
   readiness: MetricsReadiness;
   videos: VideoCatalogItem[];
   required_field_labels: Record<string, string>;
   optional_field_labels: Record<string, string>;
+  pagination?: PaginationInfo | null;
 }
 
 export interface AnalyzeAllResponse {

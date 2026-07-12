@@ -147,9 +147,39 @@ export const api = {
       body: JSON.stringify({ tiktok_handle }),
     }),
   analyticsOverview: () => request<import("@/types").AccountOverview>("/analytics/overview"),
-  analyticsContent: () => request<import("@/types").ContentAnalyticsPage>("/analytics/content"),
-  analyticsContentRefresh: () =>
-    request<import("@/types").ContentAnalyticsPage>("/analytics/content/refresh", { method: "POST" }),
+  analyticsContent: (params?: {
+    sort_by?: string;
+    sort_order?: string;
+    page?: number;
+    per_page?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.sort_by) q.set("sort_by", params.sort_by);
+    if (params?.sort_order) q.set("sort_order", params.sort_order);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.per_page) q.set("per_page", String(params.per_page));
+    const qs = q.toString();
+    return request<import("@/types").ContentAnalyticsPage>(
+      `/analytics/content${qs ? `?${qs}` : ""}`,
+    );
+  },
+  analyticsContentRefresh: (params?: {
+    sort_by?: string;
+    sort_order?: string;
+    page?: number;
+    per_page?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.sort_by) q.set("sort_by", params.sort_by);
+    if (params?.sort_order) q.set("sort_order", params.sort_order);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.per_page) q.set("per_page", String(params.per_page));
+    const qs = q.toString();
+    return request<import("@/types").ContentAnalyticsPage>(
+      `/analytics/content/refresh${qs ? `?${qs}` : ""}`,
+      { method: "POST" },
+    );
+  },
   analyticsMetricsReadiness: () =>
     request<import("@/types").MetricsReadiness>("/analytics/metrics/readiness"),
   updateVideoMetrics: (video_id: string, body: Record<string, unknown>) =>

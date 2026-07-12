@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -289,10 +289,26 @@ def get_overview(service: AnalyticsService = Depends(_service)) -> AccountOvervi
         raise
 
 
+SORT_BY_VALUES = ["publish_date", "views", "likes"]
+SORT_ORDER_VALUES = ["asc", "desc"]
+
+
 @router.get("/content", response_model=ContentAnalyticsPage)
-def get_content_analytics(service: AnalyticsService = Depends(_service)) -> ContentAnalyticsPage:
+def get_content_analytics(
+    service: AnalyticsService = Depends(_service),
+    sort_by: str = Query("publish_date", description="Sort field"),
+    sort_order: str = Query("desc", description="asc or desc"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
+) -> ContentAnalyticsPage:
+    if sort_by not in SORT_BY_VALUES:
+        sort_by = "publish_date"
+    if sort_order not in SORT_ORDER_VALUES:
+        sort_order = "desc"
     try:
-        return service.get_content_page()
+        return service.get_content_page(
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page
+        )
     except Exception as exc:
         from ...errors import LakarraError
 
@@ -304,10 +320,20 @@ def get_content_analytics(service: AnalyticsService = Depends(_service)) -> Cont
 @router.post("/content/refresh", response_model=ContentAnalyticsPage)
 def refresh_content_analytics(
     service: AnalyticsService = Depends(_service),
+    sort_by: str = Query("publish_date", description="Sort field"),
+    sort_order: str = Query("desc", description="asc or desc"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
 ) -> ContentAnalyticsPage:
     """Force a live TikTok fetch, update the DB snapshot, and return the page."""
+    if sort_by not in SORT_BY_VALUES:
+        sort_by = "publish_date"
+    if sort_order not in SORT_ORDER_VALUES:
+        sort_order = "desc"
     try:
-        return service.refresh_content_page()
+        return service.refresh_content_page(
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page
+        )
     except Exception as exc:
         from ...errors import LakarraError
 

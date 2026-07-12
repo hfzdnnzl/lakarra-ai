@@ -585,12 +585,24 @@ class MetricsReadiness(BaseModel):
     optional_recommended_for: list[str] = Field(default_factory=list)
 
 
+class PaginationInfo(BaseModel):
+    """Pagination and sort metadata for paginated list responses."""
+
+    page: int = 1
+    per_page: int = 10
+    total: int = 0
+    total_pages: int = 0
+    sort_by: str = "publish_date"
+    sort_order: str = "desc"
+
+
 class ContentAnalyticsPage(BaseModel):
     overview: AccountOverview
     readiness: MetricsReadiness
     videos: list[ContentCatalogItem] = Field(default_factory=list)
     required_field_labels: dict[str, str] = Field(default_factory=dict)
     optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    pagination: PaginationInfo | None = None
 
 
 class AnalyzeAllResponse(BaseModel):

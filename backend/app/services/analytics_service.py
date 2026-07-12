@@ -30,6 +30,7 @@ from ..models.analytics import (
     ContentCatalogItem,
     HistoricalAnalytics,
     MetricsReadiness,
+    PaginationInfo,
     PerformanceMetrics,
     ReviewDecision,
     ReviewQueueItem,
@@ -693,11 +694,20 @@ class AnalyticsService:
                 f"{f' — e.g. {missing_titles}' if missing_titles else ''}."
             )
 
-    def get_content_page(self) -> ContentAnalyticsPage:
+    def get_content_page(
+        self,
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> ContentAnalyticsPage:
         settings = self.get_account_settings()
         labels = self._page_labels()
         if not settings.configured or not settings.tiktok_handle:
-            return self._empty_page(None, labels)
+            return self._empty_page(None, labels, pagination=PaginationInfo(
+                page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            ))
 
         handle = settings.tiktok_handle
 
@@ -706,21 +716,37 @@ class AnalyticsService:
         if snapshot is not None:
             try:
                 account = _account_from_dict(snapshot)
-                return self._build_page_from_account(handle, account, labels)
+                return self._build_page_from_account(
+                    handle, account, labels,
+                    live_data_error=None,
+                    sort_by=sort_by, sort_order=sort_order,
+                    page=page, per_page=per_page,
+                )
             except Exception:
                 logger.warning("get_content_page.snapshot_parse_failed", exc_info=True)
-                # Fall through to live fetch if snapshot is corrupt.
 
         # No snapshot yet — fetch from TikTok, cache it, then serve.
-        return self._fetch_and_cache_page(handle, labels)
+        return self._fetch_and_cache_page(handle, labels, sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page)
 
-    def refresh_content_page(self) -> ContentAnalyticsPage:
+    def refresh_content_page(
+        self,
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> ContentAnalyticsPage:
         """Force a live TikTok fetch, update the DB snapshot, and return the page."""
         settings = self.get_account_settings()
         labels = self._page_labels()
         if not settings.configured or not settings.tiktok_handle:
-            return self._empty_page(None, labels)
-        return self._fetch_and_cache_page(settings.tiktok_handle, labels)
+            return self._empty_page(None, labels, pagination=PaginationInfo(
+                page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            ))
+        return self._fetch_and_cache_page(
+            settings.tiktok_handle, labels,
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page,
+        )
 
     # -- helpers ------------------------------------------------------------
 
@@ -735,26 +761,47 @@ class AnalyticsService:
             },
         }
 
-    def _empty_page(self, handle: str | None, labels: dict) -> ContentAnalyticsPage:
+    def _empty_page(
+        self,
+        handle: str | None,
+        labels: dict,
+        *,
+        pagination: PaginationInfo | None = None,
+    ) -> ContentAnalyticsPage:
         overview = AccountOverview(tiktok_handle=handle, account_configured=handle is not None)
         return ContentAnalyticsPage(
             overview=overview,
             readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
             videos=[],
+            pagination=pagination,
             **labels,
         )
 
-    def _fetch_and_cache_page(self, handle: str, labels: dict) -> ContentAnalyticsPage:
+    def _fetch_and_cache_page(
+        self,
+        handle: str,
+        labels: dict,
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> ContentAnalyticsPage:
         """Fetch from TikTok API, persist snapshot, build and return the page."""
         account, live_data_error = self._fetch_account(handle)
         if account is None:
-            return self._empty_page(handle, labels)
+            return self._empty_page(handle, labels, pagination=PaginationInfo(
+                page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            ))
 
         # Persist snapshot so subsequent loads skip the TikTok API call.
         self.repo.save_snapshot(_account_to_dict(account))
         self.session.commit()
 
-        return self._build_page_from_account(handle, account, labels, live_data_error=live_data_error)
+        return self._build_page_from_account(
+            handle, account, labels, live_data_error=live_data_error,
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page,
+        )
 
     def _build_page_from_account(
         self,
@@ -763,6 +810,10 @@ class AnalyticsService:
         labels: dict,
         *,
         live_data_error: str | None = None,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
     ) -> ContentAnalyticsPage:
         for video in account.videos:
             self._sync_public_metrics(handle, video)
@@ -774,12 +825,58 @@ class AnalyticsService:
         readiness = self._compute_metrics_readiness(handle, account)
         catalog = self._build_video_catalog(handle, account)
 
+        sorted_catalog, pagination = self._sort_and_paginate(
+            catalog, sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page
+        )
+
         return ContentAnalyticsPage(
             overview=overview,
             readiness=readiness,
-            videos=catalog,
+            videos=sorted_catalog,
+            pagination=pagination,
             **labels,
         )
+
+    @staticmethod
+    def _sort_and_paginate(
+        catalog: list[ContentCatalogItem],
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> tuple[list[ContentCatalogItem], PaginationInfo]:
+        reverse = sort_order == "desc"
+
+        if sort_by == "publish_date":
+            def sort_key(item: ContentCatalogItem) -> tuple:
+                return (item.publish_date, item.publish_time)
+        elif sort_by == "views":
+            def sort_key(item: ContentCatalogItem) -> int:
+                return item.metrics.views or 0
+        elif sort_by == "likes":
+            def sort_key(item: ContentCatalogItem) -> int:
+                return item.metrics.likes or 0
+        else:
+            def sort_key(item: ContentCatalogItem) -> tuple:
+                return (item.publish_date, item.publish_time)
+
+        sorted_list = sorted(catalog, key=sort_key, reverse=reverse)
+        total = len(sorted_list)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_items = sorted_list[start:end]
+
+        pagination = PaginationInfo(
+            page=page,
+            per_page=per_page,
+            total=total,
+            total_pages=total_pages,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        return page_items, pagination
 
     def update_video_metrics(self, video_id: str, body: VideoMetricsData) -> VideoMetricsRead:
         handle = self._require_handle()
