@@ -114,6 +114,23 @@ class AnalyticsRepository:
                 latest[row.video_id] = row
         return latest
 
+    def delete_content_analyses_except_latest(self, video_id: str) -> int:
+        """Delete all analyses for a video except the highest-versioned (latest) one.
+        Returns the number of deleted rows.
+        """
+        latest = self.get_latest_analysis_for_video(video_id)
+        if latest is None:
+            return 0
+
+        stmt = select(ContentAnalysisORM).where(
+            ContentAnalysisORM.video_id == video_id,
+            ContentAnalysisORM.id != latest.id,
+        )
+        old_rows = list(self.session.scalars(stmt))
+        for row in old_rows:
+            self.session.delete(row)
+        return len(old_rows)
+
     # --- Video metrics (user-editable) -------------------------------------
     def get_video_metrics(self, video_id: str) -> VideoMetricsORM | None:
         stmt = select(VideoMetricsORM).where(VideoMetricsORM.video_id == video_id)

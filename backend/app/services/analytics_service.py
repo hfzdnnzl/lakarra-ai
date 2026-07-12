@@ -1510,3 +1510,14 @@ class AnalyticsService:
                     value=float(value),
                     dimension=vid,
                 )
+
+    def prune_old_analyses(self, video_id: str) -> int:
+        """Delete all analysis versions for a video except the latest.
+        Returns the number of deleted rows. Raises NotFoundError if no analysis exists.
+        """
+        latest = self.repo.get_latest_analysis_for_video(video_id)
+        if latest is None:
+            raise NotFoundError(f"No analysis found for video '{video_id}'.")
+        deleted = self.repo.delete_content_analyses_except_latest(video_id)
+        self.session.commit()
+        return deleted

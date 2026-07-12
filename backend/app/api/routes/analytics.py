@@ -370,3 +370,18 @@ def get_historical(service: AnalyticsService = Depends(_service)) -> HistoricalA
 def list_metrics(service: AnalyticsService = Depends(_service)) -> list[dict]:
     historical = service.get_historical()
     return [s.model_dump(mode="json") for s in historical.metrics_snapshots]
+
+
+@router.post("/content/{post_id}/analysis/prune")
+def prune_content_analyses(
+    post_id: str,
+    service: AnalyticsService = Depends(_service),
+) -> dict:
+    """Delete all analysis versions for a video except the latest one."""
+    from ...errors import NotFoundError as LakarraNotFoundError
+
+    try:
+        deleted = service.prune_old_analyses(post_id)
+        return {"deleted": deleted}
+    except LakarraNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc

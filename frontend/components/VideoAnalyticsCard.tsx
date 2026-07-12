@@ -8,6 +8,7 @@ import {
   Pencil,
   PlayCircle,
   RefreshCw,
+  RotateCcw,
   Save,
   Upload,
   X,
@@ -128,6 +129,8 @@ export function VideoAnalyticsCard({
   );
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [pruning, setPruning] = useState(false);
+  const [showPruneConfirm, setShowPruneConfirm] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -240,6 +243,19 @@ export function VideoAnalyticsCard({
       setError((e as Error).message);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const pruneOldVersions = async () => {
+    setPruning(true);
+    setShowPruneConfirm(false);
+    try {
+      await api.pruneContentAnalyses(video.video_id);
+      onUpdated();
+    } catch (e) {
+      // Silently handle — the parent loader will show the error if needed.
+    } finally {
+      setPruning(false);
     }
   };
 
@@ -583,6 +599,46 @@ export function VideoAnalyticsCard({
                   </p>
                 )}
               </details>
+
+              {/* Reset old analysis versions */}
+              <div className="rounded-md border border-border p-3">
+                {showPruneConfirm ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Delete all previous analysis versions for this video, keeping only the latest one?
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={pruning}
+                        onClick={pruneOldVersions}
+                      >
+                        {pruning ? (
+                          <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                        ) : null}
+                        Delete old versions
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setShowPruneConfirm(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowPruneConfirm(true)}
+                  >
+                    <RotateCcw className="mr-1.5 h-4 w-4" />
+                    Reset old analyses
+                  </Button>
+                )}
+              </div>
             </>
           ) : null}
 

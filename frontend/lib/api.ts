@@ -180,6 +180,10 @@ export const api = {
       { method: "POST" },
     );
   },
+  pruneContentAnalyses: (video_id: string) =>
+    request<{ deleted: number }>(`/analytics/content/${video_id}/analysis/prune`, {
+      method: "POST",
+    }),
   analyticsMetricsReadiness: () =>
     request<import("@/types").MetricsReadiness>("/analytics/metrics/readiness"),
   updateVideoMetrics: (video_id: string, body: Record<string, unknown>) =>
