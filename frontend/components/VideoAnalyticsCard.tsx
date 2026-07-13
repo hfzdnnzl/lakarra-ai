@@ -629,14 +629,22 @@ export function VideoAnalyticsCard({
                     </div>
                   </div>
                 ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setShowPruneConfirm(true)}
-                  >
-                    <RotateCcw className="mr-1.5 h-4 w-4" />
-                    Reset old analyses
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    {video.old_analysis_count && video.old_analysis_count > 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        {video.old_analysis_count} old version{video.old_analysis_count > 1 ? "s" : ""}
+                      </span>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!video.old_analysis_count || video.old_analysis_count === 0}
+                      onClick={() => setShowPruneConfirm(true)}
+                    >
+                      <RotateCcw className="mr-1.5 h-4 w-4" />
+                      Reset old analyses
+                    </Button>
+                  </div>
                 )}
               </div>
             </>

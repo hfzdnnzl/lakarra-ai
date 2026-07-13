@@ -490,6 +490,7 @@ export interface ContentCatalogItem {
   upload_filename?: string | null;
   metrics: VideoMetrics;
   metrics_priority: string;
+  old_analysis_count?: number;
 }
 
 /** @deprecated Use ContentCatalogItem */

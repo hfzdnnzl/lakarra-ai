@@ -555,6 +555,7 @@ class ContentCatalogItem(BaseModel):
     upload_filename: str | None = None
     metrics: VideoMetricsRead
     metrics_priority: str = "normal"
+    old_analysis_count: int = 0
 
     @property
     def video_id(self) -> str:

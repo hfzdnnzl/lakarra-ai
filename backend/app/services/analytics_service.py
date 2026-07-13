@@ -513,6 +513,16 @@ class AnalyticsService:
         self, handle: str, account: TikTokAccountData
     ) -> list[ContentCatalogItem]:
         analyses = self.repo.get_latest_analyses_map()
+
+        # Pre-compute old-analysis counts per video (rows minus the latest).
+        all_analysis_rows = self.repo.list_content_analyses(limit=500)
+        analysis_count_except_latest: dict[str, int] = {}
+        for row in all_analysis_rows:
+            if row.video_id not in analysis_count_except_latest:
+                analysis_count_except_latest[row.video_id] = 0
+            else:
+                analysis_count_except_latest[row.video_id] += 1
+
         sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
         metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
@@ -561,6 +571,7 @@ class AnalyticsService:
                     upload_filename=upload.original_filename if upload else None,
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
+                    old_analysis_count=analysis_count_except_latest.get(vid, 0),
                 )
             )
         return catalog
