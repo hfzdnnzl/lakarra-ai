@@ -474,6 +474,13 @@ export interface ContentAnalysisSummary {
 /** @deprecated Use ContentAnalysisSummary */
 export type VideoAnalysisSummary = ContentAnalysisSummary;
 
+export interface VideoUploadInfo {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  position: number;
+}
+
 export interface ContentCatalogItem {
   video_id: string;
   content_type: ContentType;
@@ -491,6 +498,7 @@ export interface ContentCatalogItem {
   has_media_upload?: boolean;
   has_video_upload?: boolean;
   upload_filename?: string | null;
+  uploads?: VideoUploadInfo[];
   metrics: VideoMetrics;
   metrics_priority: string;
   old_analysis_count?: number;

@@ -38,6 +38,7 @@ from ..models.analytics import (
     VideoInfo,
     VideoMetricsData,
     VideoMetricsRead,
+    VideoUploadInfo,
     VideoUploadRead,
     normalize_tiktok_handle,
 )
@@ -538,14 +539,18 @@ class AnalyticsService:
         sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
         metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
-        uploads_map = {u.video_id: u for u in self.repo.list_video_uploads(tiktok_handle=handle)}
+        all_uploads = self.repo.list_video_uploads(tiktok_handle=handle)
+        uploads_map: dict[str, list[VideoUploadORM]] = {}
+        for u in all_uploads:
+            uploads_map.setdefault(u.video_id, []).append(u)
 
         catalog: list[VideoCatalogItem] = []
         for video in account.videos:
             vid = video.video.video_id
             priority = "high" if vid in priority_ids else "normal"
             row = metrics_map.get(vid)
-            upload = uploads_map.get(vid)
+            vid_uploads = uploads_map.get(vid, [])
+            first_upload = vid_uploads[0] if vid_uploads else None
             latest = analyses.get(vid)
             payload = latest.payload if latest else {}
             publish_date, publish_time = resolve_publish_metadata(
@@ -578,9 +583,10 @@ class AnalyticsService:
                     analysis_version=latest.version if latest else None,
                     analysis_id=latest.id if latest else None,
                     analysis=analysis_summary,
-                    has_media_upload=upload is not None,
-                    has_video_upload=upload is not None,
-                    upload_filename=upload.original_filename if upload else None,
+                    has_media_upload=first_upload is not None,
+                    has_video_upload=first_upload is not None,
+                    upload_filename=first_upload.original_filename if first_upload else None,
+                    uploads=[VideoUploadInfo(id=u.id, original_filename=u.original_filename, mime_type=u.mime_type, position=u.position) for u in vid_uploads],
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
                     old_analysis_count=analysis_count_except_latest.get(vid, 0),
@@ -608,46 +614,106 @@ class AnalyticsService:
         if not self._video_known(handle, video_id):
             raise NotFoundError(f"Video '{video_id}' not found.")
 
-        existing = self.repo.get_video_upload(video_id)
-        if existing is not None:
-            try:
-                get_storage().delete(existing.storage_key)
-            except OSError:
-                logger.warning("upload.delete_old_failed video_id=%s", video_id)
+        # Determine content type to decide replace-vs-append behaviour
+        content_type = self._get_video_content_type(handle, video_id)
+
+        if content_type != "CAROUSEL":
+            # For VIDEO and IMAGE: replace old upload
+            existing_uploads = self.repo.get_video_uploads(video_id)
+            for existing in existing_uploads:
+                try:
+                    get_storage().delete(existing.storage_key)
+                except OSError:
+                    logger.warning("upload.delete_old_failed upload_id=%s", existing.id)
+                self.session.delete(existing)
+            self.session.flush()
+            position = 0
+        else:
+            # For CAROUSEL: append as next image
+            existing = self.repo.get_video_uploads(video_id)
+            position = len(existing)
 
         storage_key = (
             f"analytics/{video_id}/{uuid4().hex}_{_safe_filename(original_filename)}"
         )
         get_storage().put_object(storage_key, data, content_type=mime_type)
-        row = self.repo.upsert_video_upload(
+        row = self.repo.add_video_upload(
             video_id=video_id,
             tiktok_handle=handle,
             storage_key=storage_key,
             mime_type=mime_type,
             file_size=len(data),
             original_filename=_safe_filename(original_filename),
+            position=position,
         )
         self.session.commit()
         return VideoUploadRead(
+            id=row.id,
             video_id=video_id,
             original_filename=row.original_filename,
             mime_type=row.mime_type,
             file_size=row.file_size,
+            position=row.position,
             uploaded_at=row.updated_at,
         )
 
-    def get_video_upload_row(self, video_id: str):
-        return self.repo.get_video_upload(video_id)
+    def get_video_upload_row(self, upload_id: str):
+        return self.repo.get_video_upload(upload_id)
 
-    def delete_video_upload(self, video_id: str) -> None:
-        row = self.repo.delete_video_upload(video_id)
+    def get_video_upload_row_for_video(self, video_id: str):
+        """Return the first upload ORM row for a video (backwards compat)."""
+        uploads = self.repo.get_video_uploads(video_id)
+        return uploads[0] if uploads else None
+
+    def get_video_uploads(self, video_id: str) -> list[VideoUploadRead]:
+        rows = self.repo.get_video_uploads(video_id)
+        return [
+            VideoUploadRead(
+                id=r.id,
+                video_id=r.video_id,
+                original_filename=r.original_filename,
+                mime_type=r.mime_type,
+                file_size=r.file_size,
+                position=r.position,
+                uploaded_at=r.updated_at,
+            )
+            for r in rows
+        ]
+
+    def delete_video_upload(self, upload_id: str) -> None:
+        row = self.repo.get_video_upload(upload_id)
         if row is None:
-            raise NotFoundError(f"No upload found for video '{video_id}'.")
+            raise NotFoundError(f"Upload '{upload_id}' not found.")
         try:
             get_storage().delete(row.storage_key)
         except OSError:
-            logger.warning("upload.delete_storage_failed video_id=%s", video_id)
+            logger.warning("upload.delete_storage_failed upload_id=%s", upload_id)
+        self.session.delete(row)
         self.session.commit()
+
+    def delete_all_video_uploads(self, video_id: str) -> int:
+        rows = self.repo.delete_all_video_uploads(video_id)
+        for row in rows:
+            try:
+                get_storage().delete(row.storage_key)
+            except OSError:
+                logger.warning("upload.delete_storage_failed upload_id=%s", row.id)
+        self.session.commit()
+        return len(rows)
+
+    def _get_video_content_type(self, handle: str, video_id: str) -> str:
+        """Infer content type from the TikTok account data."""
+        try:
+            provider = build_tiktok_provider(handle)
+            account = provider.get_account(handle)
+            for video in account.videos:
+                if video.video.video_id == video_id:
+                    ct = getattr(video.video, "content_type", None)
+                    if ct:
+                        return ct.value if hasattr(ct, "value") else str(ct)
+        except Exception:
+            pass
+        return "VIDEO"
 
     # --- Video metrics & catalog -------------------------------------------
     def _sync_public_metrics(self, handle: str, video: TikTokVideoData) -> None:
@@ -855,7 +921,11 @@ class AnalyticsService:
     ) -> ContentAnalyticsPage:
         # --- batch-load all reference data in 3 queries (not N queries) ---
         metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
-        uploads_map = {u.video_id: u for u in self.repo.list_video_uploads(tiktok_handle=handle)}
+        all_uploads = self.repo.list_video_uploads(tiktok_handle=handle)
+        uploads_map_page: dict[str, list[VideoUploadORM]] = {}
+        for u in all_uploads:
+            uploads_map_page.setdefault(u.video_id, []).append(u)
+        uploads_map_legacy: dict[str, VideoUploadORM] = {u.video_id: u for u in all_uploads}
         analyses = self.repo.get_latest_analyses_map()
 
         # Seed public metrics for new videos (batched, then reload the map).
@@ -898,7 +968,8 @@ class AnalyticsService:
             vid = video.video.video_id
             perf = video.performance
             row = metrics_map.get(vid)
-            upload = uploads_map.get(vid)
+            vid_uploads = uploads_map_page.get(vid, [])
+            upload = vid_uploads[0] if vid_uploads else None
             latest = analyses.get(vid)
             priority = "high" if vid in priority_ids else "normal"
 
@@ -974,6 +1045,7 @@ class AnalyticsService:
                     has_media_upload=upload is not None,
                     has_video_upload=upload is not None,
                     upload_filename=upload.original_filename if upload else None,
+                    uploads=[VideoUploadInfo(id=u.id, original_filename=u.original_filename, mime_type=u.mime_type, position=u.position) for u in vid_uploads],
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
                     old_analysis_count=0,

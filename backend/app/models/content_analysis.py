@@ -859,7 +859,7 @@ class ImageContentAnalysisSection(BaseModel):
 class CarouselPageAnalysis(BaseModel):
     """Per-slide analysis within a carousel."""
 
-    page_index: int = Field(ge=0)
+    page_index: int = Field(default=0, ge=0)
     composition: RatedDimension
     typography: RatedDimension
     readability: RatedDimension

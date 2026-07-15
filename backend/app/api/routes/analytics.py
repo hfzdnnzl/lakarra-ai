@@ -142,12 +142,53 @@ async def upload_video(
         raise
 
 
+@router.post("/videos/{video_id}/uploads", response_model=list[VideoUploadRead], status_code=201)
+async def upload_multiple_files(
+    video_id: str,
+    files: list[UploadFile] = File(...),
+    service: AnalyticsService = Depends(_service),
+) -> list[VideoUploadRead]:
+    results: list[VideoUploadRead] = []
+    errors: list[str] = []
+    for file in files:
+        try:
+            data = await file.read()
+            mime = file.content_type or "application/octet-stream"
+            result = service.upload_video_file(
+                video_id,
+                data=data,
+                mime_type=mime,
+                original_filename=file.filename or "upload.jpg",
+            )
+            results.append(result)
+        except ValueError as exc:
+            errors.append(f"{file.filename}: {exc}")
+        except Exception as exc:
+            from ...errors import LakarraError
+            if isinstance(exc, LakarraError):
+                errors.append(f"{file.filename}: {exc.message}")
+            else:
+                raise
+    if errors and not results:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+    return results
+
+
+@router.get("/videos/{video_id}/uploads", response_model=list[VideoUploadRead])
+def list_video_uploads(
+    video_id: str,
+    service: AnalyticsService = Depends(_service),
+) -> list[VideoUploadRead]:
+    return service.get_video_uploads(video_id)
+
+
 @router.get("/videos/{video_id}/upload/stream")
 def stream_video_upload(
     video_id: str,
+    upload_id: str | None = None,
     service: AnalyticsService = Depends(_service),
 ):
-    row = service.get_video_upload_row(video_id)
+    row = service.get_video_upload_row(upload_id) if upload_id else service.get_video_upload_row_for_video(video_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Upload not found")
     local_path = get_storage().get_local_path(row.storage_key)
@@ -172,10 +213,15 @@ def stream_video_upload(
 @router.delete("/videos/{video_id}/upload", status_code=204)
 def delete_video_upload(
     video_id: str,
+    upload_id: str | None = None,
     service: AnalyticsService = Depends(_service),
 ) -> None:
     try:
-        service.delete_video_upload(video_id)
+        if upload_id:
+            service.delete_video_upload(upload_id)
+        else:
+            # Backwards compat: delete all uploads for this video
+            service.delete_all_video_uploads(video_id)
     except Exception as exc:
         from ...errors import LakarraError
 

@@ -439,14 +439,17 @@ class VideoMetricsORM(TimestampMixin, Base):
 
 
 class VideoUploadORM(TimestampMixin, Base):
-    """User-uploaded TikTok video file for analytics visual analysis."""
+    """User-uploaded media file for analytics visual analysis.
+    Carousel posts can have multiple uploads (one per image), ordered by position.
+    """
 
     __tablename__ = "video_uploads"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    video_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    video_id: Mapped[str] = mapped_column(String(128), index=True)
     tiktok_handle: Mapped[str] = mapped_column(String(128), index=True)
     storage_key: Mapped[str] = mapped_column(String(512))
     mime_type: Mapped[str] = mapped_column(String(128))
     file_size: Mapped[int] = mapped_column(Integer)
     original_filename: Mapped[str] = mapped_column(String(255))
+    position: Mapped[int] = mapped_column(Integer, default=0)

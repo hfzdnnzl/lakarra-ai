@@ -122,7 +122,7 @@ class TestAnalyticsService:
         from app.repositories.analytics_repository import AnalyticsRepository
 
         repo = AnalyticsRepository(db_session)
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-004",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-004/full.mp4",
@@ -172,7 +172,7 @@ class TestAnalyticsService:
         from unittest.mock import MagicMock, patch
 
         repo = AnalyticsRepository(analytics_service.session)
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-002",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-002/full.mp4",
@@ -199,7 +199,7 @@ class TestAnalyticsService:
         from unittest.mock import MagicMock, patch
 
         repo = AnalyticsRepository(analytics_service.session)
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-003",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-003/full.mp4",
@@ -223,7 +223,7 @@ class TestAnalyticsService:
         from unittest.mock import MagicMock, patch
 
         repo = AnalyticsRepository(analytics_service.session)
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-001",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-001/full.mp4",
@@ -231,7 +231,7 @@ class TestAnalyticsService:
             file_size=20,
             original_filename="clip.mp4",
         )
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-002",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-002/full.mp4",

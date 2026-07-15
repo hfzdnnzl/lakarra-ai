@@ -235,10 +235,37 @@ export const api = {
       file_size: number;
     }>;
   },
-  analyticsVideoStreamUrl: (video_id: string) =>
-    `${API_URL}/analytics/videos/${video_id}/upload/stream`,
-  deleteAnalyticsVideoUpload: (video_id: string) =>
-    request<void>(`/analytics/videos/${video_id}/upload`, { method: "DELETE" }),
+  uploadAnalyticsCarouselImages: async (video_id: string, files: File[]) => {
+    const form = new FormData();
+    for (const file of files) {
+      form.append("files", file);
+    }
+    const res = await fetch(`${API_URL}/analytics/videos/${video_id}/uploads`, {
+      method: "POST",
+      body: form,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let message = `Upload failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { detail?: string };
+        if (body.detail) message = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(message);
+    }
+    return res.json() as Promise<import("@/types").VideoUploadInfo[]>;
+  },
+  analyticsVideoStreamUrl: (video_id: string, upload_id?: string) => {
+    const base = `${API_URL}/analytics/videos/${video_id}/upload/stream`;
+    return upload_id ? `${base}?upload_id=${encodeURIComponent(upload_id)}` : base;
+  },
+  deleteAnalyticsVideoUpload: (video_id: string, upload_id?: string) => {
+    const base = `/analytics/videos/${video_id}/upload`;
+    const url = upload_id ? `${base}?upload_id=${encodeURIComponent(upload_id)}` : base;
+    return request<void>(url, { method: "DELETE" });
+  },
   analyticsCompetitors: () => request<import("@/types").CompetitorOverview>("/analytics/competitors"),
   analyticsTrends: () =>
     request<{ reports: import("@/types").TrendReportRecord[] }>("/analytics/trends"),

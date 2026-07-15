@@ -535,6 +535,14 @@ class VideoMetricsRead(VideoMetricsData):
     metrics_priority: str = "normal"  # "high" for best/worst performers
 
 
+class VideoUploadInfo(BaseModel):
+    """Lightweight upload info embedded in catalog items."""
+    id: str
+    original_filename: str
+    mime_type: str
+    position: int = 0
+
+
 class ContentCatalogItem(BaseModel):
     post_id: str = Field(
         validation_alias=AliasChoices("post_id", "video_id"),
@@ -555,6 +563,7 @@ class ContentCatalogItem(BaseModel):
     has_media_upload: bool = False
     has_video_upload: bool = False
     upload_filename: str | None = None
+    uploads: list[VideoUploadInfo] = Field(default_factory=list)
     metrics: VideoMetricsRead
     metrics_priority: str = "normal"
     old_analysis_count: int = 0
@@ -568,10 +577,12 @@ VideoCatalogItem = ContentCatalogItem
 
 
 class VideoUploadRead(BaseModel):
+    id: str
     video_id: str
     original_filename: str
     mime_type: str
     file_size: int
+    position: int = 0
     uploaded_at: datetime
 
 

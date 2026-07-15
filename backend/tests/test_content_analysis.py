@@ -164,7 +164,7 @@ class TestContentAnalysisFlows:
 
     def test_video_full_with_upload(self, analytics_service: AnalyticsService, db_session: Session):
         repo = AnalyticsRepository(db_session)
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-004",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-004/full.mp4",
@@ -194,7 +194,7 @@ class TestContentAnalysisFlows:
 
     def test_image_full_with_upload(self, analytics_service: AnalyticsService, db_session: Session):
         repo = AnalyticsRepository(db_session)
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-003",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-003/cover.jpg",

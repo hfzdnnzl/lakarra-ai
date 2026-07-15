@@ -106,6 +106,8 @@ export function VideoAnalyticsCard({
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const label = videoDisplayLabel(video);
   const isImage = video.content_type === "IMAGE";
+  const isCarousel = video.content_type === "CAROUSEL";
+  const isImageOrCarousel = isImage || isCarousel;
   const hasUpload = video.has_media_upload ?? video.has_video_upload ?? false;
   const analysisInputs = video.analysis?.analysis_inputs;
   const analysisMetrics = analysisInputs?.metrics;
@@ -232,11 +234,24 @@ export function VideoAnalyticsCard({
     }
   };
 
-  const removeUpload = async () => {
+  const uploadCarouselImages = async (files: FileList | File[]) => {
     setUploading(true);
     setError(null);
     try {
-      await api.deleteAnalyticsVideoUpload(video.video_id);
+      await api.uploadAnalyticsCarouselImages(video.video_id, Array.from(files));
+      onUpdated();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeUpload = async (upload_id?: string) => {
+    setUploading(true);
+    setError(null);
+    try {
+      await api.deleteAnalyticsVideoUpload(video.video_id, upload_id);
       onUpdated();
     } catch (e) {
       setError((e as Error).message);
@@ -364,10 +379,13 @@ export function VideoAnalyticsCard({
                 )
               ) : null}
               {hasUpload ? (
-                <Badge variant="outline">{isImage ? "Image uploaded" : "Video uploaded"}</Badge>
+                <Badge variant="outline">{isImageOrCarousel ? "Media uploaded" : "Video uploaded"}</Badge>
               ) : null}
-              {video.content_type === "IMAGE" ? (
+              {isImage ? (
                 <Badge variant="outline">Image post</Badge>
+              ) : null}
+              {isCarousel ? (
+                <Badge variant="outline">Carousel post</Badge>
               ) : null}
               {video.analysis?.analysis_mode === "full" && video.analysis.visual_provider === "mock" ? (
                 <Badge variant="warning">Demo visual analysis</Badge>
@@ -650,57 +668,89 @@ export function VideoAnalyticsCard({
           ) : null}
 
           <div className="space-y-2 rounded-md border p-3">
-            <div className="font-medium">{isImage ? "Image for analysis" : "Video for analysis"}</div>
+            <div className="font-medium">{isImageOrCarousel ? "Media for analysis" : "Video for analysis"}</div>
             <p className="text-xs text-muted-foreground">
               {isImage
                 ? "Upload the posted TikTok image here for full visual analysis."
-                : "Upload the posted TikTok video here for full visual analysis."}
+                : isCarousel
+                  ? "Upload all the posted TikTok carousel images here for full visual analysis."
+                  : "Upload the posted TikTok video here for full visual analysis."}
             </p>
             <input
               ref={uploadInputRef}
               type="file"
+              multiple={isCarousel}
               accept={
-                isImage
+                isImageOrCarousel
                   ? "image/jpeg,image/png,image/webp"
                   : "video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp"
               }
               className="hidden"
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void uploadVideo(file);
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
+                if (isCarousel && files.length > 1) {
+                  void uploadCarouselImages(files);
+                } else if (isCarousel) {
+                  void uploadVideo(files[0]);
+                } else {
+                  const file = files[0];
+                  if (file) void uploadVideo(file);
+                }
                 e.target.value = "";
               }}
             />
-            {hasUpload && video.upload_filename ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-sm">{video.upload_filename}</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setPreviewOpen(true)}
-                >
-                  <PlayCircle className="mr-1.5 h-4 w-4" />
-                  Preview
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={uploading}
-                  onClick={() => uploadInputRef.current?.click()}
-                >
-                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Replace"}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={uploading}
-                  onClick={() => void removeUpload()}
-                >
-                  Remove
-                </Button>
+            {hasUpload && video.uploads && video.uploads.length > 0 ? (
+              <div className="space-y-2">
+                {video.uploads.map((upload) => (
+                  <div key={upload.id} className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate text-sm">{upload.original_filename}</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setPreviewOpen(true)}
+                    >
+                      <PlayCircle className="mr-1.5 h-4 w-4" />
+                      Preview
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={uploading}
+                      onClick={() => void removeUpload(upload.id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+                {isCarousel ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={uploading}
+                    onClick={() => uploadInputRef.current?.click()}
+                  >
+                    {uploading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="mr-2 h-4 w-4" />
+                    )}
+                    Add more images
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={uploading}
+                    onClick={() => uploadInputRef.current?.click()}
+                  >
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Replace"}
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-2">
@@ -716,12 +766,14 @@ export function VideoAnalyticsCard({
                   ) : (
                     <Upload className="mr-2 h-4 w-4" />
                   )}
-                  Upload {isImage ? "image" : "video"} for analysis
+                  Upload {isCarousel ? "images" : isImage ? "image" : "video"} for analysis
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   {isImage
                     ? "JPEG, PNG, or WebP up to 50 MB."
-                    : "MP4, MOV, WebM, or image formats up to 50 MB."}
+                    : isCarousel
+                      ? "JPEG, PNG, or WebP up to 50 MB. Select multiple images at once."
+                      : "MP4, MOV, WebM, or image formats up to 50 MB."}
                 </p>
               </div>
             )}
@@ -861,7 +913,7 @@ export function VideoAnalyticsCard({
         <VideoPreviewOverlay
           src={api.analyticsVideoStreamUrl(video.video_id)}
           title={video.upload_filename ?? label}
-          kind={isImage ? "image" : "video"}
+          kind={isImageOrCarousel ? "image" : "video"}
           onClose={() => setPreviewOpen(false)}
         />
       ) : null}
