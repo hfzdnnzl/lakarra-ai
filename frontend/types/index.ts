@@ -382,8 +382,11 @@ export interface VideoMetrics {
   watch_time?: number | null;
   average_watch_duration?: number | null;
   completion_rate?: number | null;
+  photos_viewed?: number | null;
+  /** @deprecated Not available on TikTok; kept for backward compat. */
   profile_visits?: number | null;
   followers_gained?: number | null;
+  /** @deprecated Not available on TikTok; kept for backward compat. */
   link_clicks?: number | null;
   user_notes?: string | null;
   publish_date?: string | null;
@@ -525,6 +528,9 @@ export interface ContentAnalyticsPage {
   videos: VideoCatalogItem[];
   required_field_labels: Record<string, string>;
   optional_field_labels: Record<string, string>;
+  video_optional_field_labels: Record<string, string>;
+  image_optional_field_labels: Record<string, string>;
+  carousel_optional_field_labels: Record<string, string>;
   pagination?: PaginationInfo | null;
 }
 

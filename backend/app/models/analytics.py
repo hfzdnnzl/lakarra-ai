@@ -115,6 +115,7 @@ class PerformanceMetrics(BaseModel):
     comments: int = 0
     shares: int = 0
     saves: int = 0
+    photos_viewed: int = 0
     profile_visits: int = 0
     followers_gained: int = 0
     link_clicks: int | None = None
@@ -518,6 +519,7 @@ class VideoMetricsData(BaseModel):
     watch_time: float | None = None
     average_watch_duration: float | None = None
     completion_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    photos_viewed: int | None = None
     profile_visits: int | None = None
     followers_gained: int | None = None
     link_clicks: int | None = None
@@ -603,6 +605,9 @@ class ContentAnalyticsPage(BaseModel):
     videos: list[ContentCatalogItem] = Field(default_factory=list)
     required_field_labels: dict[str, str] = Field(default_factory=dict)
     optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    video_optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    image_optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    carousel_optional_field_labels: dict[str, str] = Field(default_factory=dict)
     pagination: PaginationInfo | None = None
 
 

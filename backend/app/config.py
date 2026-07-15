@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     tiktok_rate_limit_retries: int = 3
     tiktok_rate_limit_retry_seconds: float = 1.2
 
+    # --- TikWM API key (paid, with a free tier) ------------------------------
+    # When tikwm.com's /api/user/posts is unavailable (returns 403), sign up at
+    # https://tikwmapi.com/ for an API key (1000 requests/month on the free tier).
+    # When set, the app uses https://tikwmapi.com as the API base and passes the
+    # key in the X-TikWMAPI-Key header for all authenticated requests.
+    tiktok_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

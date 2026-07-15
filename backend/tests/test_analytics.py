@@ -318,6 +318,7 @@ class TestAnalyticsService:
                 comments=2,
                 shares=1,
                 saves=3,
+                photos_viewed=0,
                 profile_visits=0,
                 followers_gained=0,
                 link_clicks=None,

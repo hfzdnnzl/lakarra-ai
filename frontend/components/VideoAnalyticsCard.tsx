@@ -79,9 +79,8 @@ const analysisMetricFields = [
   "watch_time",
   "average_watch_duration",
   "completion_rate",
-  "profile_visits",
+  "photos_viewed",
   "followers_gained",
-  "link_clicks",
 ] as const;
 
 function EvidenceList({ items }: { items: { source: string; description: string }[] }) {

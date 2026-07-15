@@ -166,6 +166,11 @@ export default function ContentAnalyticsPage() {
           {error}
         </div>
       ) : null}
+      {page?.overview.live_data_error ? (
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {page.overview.live_data_error}
+        </div>
+      ) : null}
       {visualAnalysisProvider === "mock" ? (
         <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Visual analysis is running in demo mode (placeholder results). Set{" "}
@@ -308,16 +313,24 @@ export default function ContentAnalyticsPage() {
           ) : (
             <>
               <div className="space-y-4">
-                {videos.map((video) => (
-                  <VideoAnalyticsCard
-                    key={video.video_id}
-                    video={video}
-                    requiredLabels={page.required_field_labels}
-                    optionalLabels={page.optional_field_labels}
-                    onUpdated={load}
-                    expandAll={expandAll}
-                  />
-                ))}
+                {videos.map((video) => {
+                  const contentTypeLabels =
+                    video.content_type === "VIDEO"
+                      ? page.video_optional_field_labels
+                      : video.content_type === "IMAGE"
+                        ? page.image_optional_field_labels
+                        : page.carousel_optional_field_labels;
+                  return (
+                    <VideoAnalyticsCard
+                      key={video.video_id}
+                      video={video}
+                      requiredLabels={page.required_field_labels}
+                      optionalLabels={contentTypeLabels}
+                      onUpdated={load}
+                      expandAll={expandAll}
+                    />
+                  );
+                })}
               </div>
 
               {/* Pagination */}

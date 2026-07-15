@@ -429,6 +429,7 @@ class VideoMetricsORM(TimestampMixin, Base):
     watch_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     average_watch_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     completion_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    photos_viewed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     profile_visits: Mapped[int | None] = mapped_column(Integer, nullable=True)
     followers_gained: Mapped[int | None] = mapped_column(Integer, nullable=True)
     link_clicks: Mapped[int | None] = mapped_column(Integer, nullable=True)
