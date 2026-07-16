@@ -928,6 +928,15 @@ class AnalyticsService:
         uploads_map_legacy: dict[str, VideoUploadORM] = {u.video_id: u for u in all_uploads}
         analyses = self.repo.get_latest_analyses_map()
 
+        # Pre-compute old-analysis counts per video (all rows minus the latest).
+        all_analysis_rows = self.repo.list_content_analyses(limit=500)
+        analysis_count_except_latest: dict[str, int] = {}
+        for row in all_analysis_rows:
+            if row.video_id not in analysis_count_except_latest:
+                analysis_count_except_latest[row.video_id] = 0
+            else:
+                analysis_count_except_latest[row.video_id] += 1
+
         # Seed public metrics for new videos (batched, then reload the map).
         new_ids = {v.video.video_id for v in account.videos if v.video.video_id not in metrics_map}
         for video in account.videos:
@@ -1048,7 +1057,7 @@ class AnalyticsService:
                     uploads=[VideoUploadInfo(id=u.id, original_filename=u.original_filename, mime_type=u.mime_type, position=u.position) for u in vid_uploads],
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
-                    old_analysis_count=0,
+                    old_analysis_count=analysis_count_except_latest.get(vid, 0),
                 )
             )
 
