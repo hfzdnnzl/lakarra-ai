@@ -72,5 +72,6 @@ For VIDEO, `content_analysis_partial` uses `type: "VIDEO"` with hook, story_scri
 For IMAGE, `content_analysis_partial` uses `type: "IMAGE"` with composition, typography, visual_hierarchy, branding, message_clarity, call_to_action, visual_appeal, color_harmony, scroll_stopping_potential.
 For CAROUSEL, use `type: "CAROUSEL"` with cover_slide, page_effectiveness[], story_progression,
 design_consistency, swipe_engagement, cta_effectiveness, and overall_flow.
+Each entry in `page_effectiveness` MUST include `page_index` (integer starting at 0 for the cover slide).
 
 Provide 3–5 ranked `root_causes` by `estimated_impact`. Mark visual-only dimensions with `confidence: low` in metrics-only pass.

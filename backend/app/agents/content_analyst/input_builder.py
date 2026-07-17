@@ -50,7 +50,8 @@ def build_content_analysis_input(
     resolved_media: ResolvedMediaSource | None = None,
 ) -> ContentAnalysisInput:
     repo = AnalyticsRepository(session)
-    upload = repo.get_video_upload(post_id)
+    uploads = repo.get_video_uploads(post_id)
+    upload = uploads[0] if uploads else None
     upload_mime = upload.mime_type if upload else None
 
     linked_content: Content | None = None

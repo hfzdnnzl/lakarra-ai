@@ -73,7 +73,8 @@ def _resolve_upload(
     content_type: ContentType,
 ) -> ResolvedMediaSource | None:
     repo = AnalyticsRepository(session)
-    upload = repo.get_video_upload(post_id)
+    uploads = repo.get_video_uploads(post_id)
+    upload = uploads[0] if uploads else None
     if upload is None:
         return None
     try:

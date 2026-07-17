@@ -1,4 +1,4 @@
-"""Content metrics validation and merge helpers (VIDEO and IMAGE)."""
+"""Content metrics validation and merge helpers (VIDEO, IMAGE, and CAROUSEL)."""
 
 from __future__ import annotations
 
@@ -19,19 +19,26 @@ OPTIONAL_METRIC_FIELDS: tuple[str, ...] = (
     "watch_time",
     "average_watch_duration",
     "completion_rate",
-    "profile_visits",
     "followers_gained",
-    "link_clicks",
+    "photos_viewed",
 )
 
-VIDEO_OPTIONAL_METRIC_FIELDS: tuple[str, ...] = OPTIONAL_METRIC_FIELDS
+VIDEO_OPTIONAL_METRIC_FIELDS: tuple[str, ...] = (
+    "reach",
+    "watch_time",
+    "average_watch_duration",
+    "completion_rate",
+    "followers_gained",
+)
 
 IMAGE_OPTIONAL_METRIC_FIELDS: tuple[str, ...] = (
     "reach",
-    "profile_visits",
+    "watch_time",
     "followers_gained",
-    "link_clicks",
+    "photos_viewed",
 )
+
+CAROUSEL_OPTIONAL_METRIC_FIELDS: tuple[str, ...] = IMAGE_OPTIONAL_METRIC_FIELDS
 
 METRIC_FIELD_LABELS: dict[str, str] = {
     "views": "Views",
@@ -39,20 +46,21 @@ METRIC_FIELD_LABELS: dict[str, str] = {
     "comments": "Comments",
     "shares": "Shares",
     "saves": "Saves",
-    "reach": "Reach",
-    "watch_time": "Total watch time (hh:mm:ss)",
-    "average_watch_duration": "Avg watch duration (seconds)",
-    "completion_rate": "Completion rate (%)",
-    "profile_visits": "Profile visits",
-    "followers_gained": "Followers gained",
-    "link_clicks": "Link clicks",
+    "reach": "Total viewers",
+    "watch_time": "Total play time (hh:mm:ss)",
+    "average_watch_duration": "Average watch time (seconds)",
+    "completion_rate": "Watched full video (%)",
+    "followers_gained": "New followers",
+    "photos_viewed": "Photos viewed",
 }
 
 
 def optional_fields_for(content_type: ContentType) -> tuple[str, ...]:
-    if content_type in (ContentType.IMAGE, ContentType.CAROUSEL):
+    if content_type == ContentType.VIDEO:
+        return VIDEO_OPTIONAL_METRIC_FIELDS
+    if content_type == ContentType.IMAGE:
         return IMAGE_OPTIONAL_METRIC_FIELDS
-    return VIDEO_OPTIONAL_METRIC_FIELDS
+    return CAROUSEL_OPTIONAL_METRIC_FIELDS
 
 
 def metrics_from_row(row: Any | None) -> dict[str, float | int | None]:
@@ -68,6 +76,7 @@ def metrics_from_row(row: Any | None) -> dict[str, float | int | None]:
         "watch_time": row.watch_time,
         "average_watch_duration": row.average_watch_duration,
         "completion_rate": row.completion_rate,
+        "photos_viewed": row.photos_viewed,
         "profile_visits": row.profile_visits,
         "followers_gained": row.followers_gained,
         "link_clicks": row.link_clicks,

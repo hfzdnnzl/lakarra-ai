@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -36,7 +37,7 @@ from ...providers import (
     TikTokVideoData,
     build_competitor_provider,
 )
-from ...services.json_utils import extract_json
+from ...services.json_utils import InvalidJSONError, extract_json
 from ...services.prompts import load_prompt
 from ...services.content_visual_analysis import (
     VisualAnalysisContext,
@@ -64,6 +65,36 @@ class AgentAnalysisResult:
     model: str
     provider: str
     prompt_version: str
+
+
+def _parse_json_with_retry(
+    agent: ContentAnalystAgent,
+    raw_text: str,
+    original_messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Parse JSON from LLM output, retrying once with a correction prompt on failure."""
+    try:
+        return extract_json(raw_text)
+    except InvalidJSONError:
+        pass
+
+    # Retry: tell the LLM its previous output had a JSON syntax error.
+    retry_prompt = (
+        "Your previous response was not valid JSON. "
+        "Respond with ONLY a single valid JSON object (no markdown, no extra text, "
+        "no trailing commas, no comments) that conforms to the schema you were given."
+    )
+    from ...services.llm.base import Message
+
+    retry_messages = original_messages + [
+        {"role": "assistant", "content": raw_text},
+        {"role": "user", "content": retry_prompt},
+    ]
+    retry_completion = agent.complete(
+        [Message(role=m["role"], content=m["content"]) for m in retry_messages],
+        temperature=0.2,  # Lower temperature for more deterministic output.
+    )
+    return extract_json(retry_completion.text)
 
 
 def _format_past_posts(posts: list[Content]) -> str:
@@ -143,18 +174,22 @@ class ContentAnalystAgent(BaseAgent):
         variables: dict[str, str],
         model_cls: type,
     ) -> AgentAnalysisResult:
+        from ...services.llm.base import Message
+        from ...services.json_utils import InvalidJSONError
+
         template = load_prompt(prompt_name)
         messages = [
             {"role": "system", "content": template.system},
             {"role": "user", "content": template.render_user(variables)},
         ]
-        from ...services.llm.base import Message
 
         completion = self.complete(
             [Message(role=m["role"], content=m["content"]) for m in messages],
             temperature=0.3,
         )
-        data = extract_json(completion.text)
+
+        data = _parse_json_with_retry(self, completion.text, messages)
+
         try:
             validated = model_cls(**data)
         except ValidationError as exc:

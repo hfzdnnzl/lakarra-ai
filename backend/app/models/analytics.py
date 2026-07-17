@@ -115,6 +115,7 @@ class PerformanceMetrics(BaseModel):
     comments: int = 0
     shares: int = 0
     saves: int = 0
+    photos_viewed: int = 0
     profile_visits: int = 0
     followers_gained: int = 0
     link_clicks: int | None = None
@@ -518,6 +519,7 @@ class VideoMetricsData(BaseModel):
     watch_time: float | None = None
     average_watch_duration: float | None = None
     completion_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    photos_viewed: int | None = None
     profile_visits: int | None = None
     followers_gained: int | None = None
     link_clicks: int | None = None
@@ -531,6 +533,14 @@ class VideoMetricsRead(VideoMetricsData):
     required_complete: bool = False
     missing_required: list[str] = Field(default_factory=list)
     metrics_priority: str = "normal"  # "high" for best/worst performers
+
+
+class VideoUploadInfo(BaseModel):
+    """Lightweight upload info embedded in catalog items."""
+    id: str
+    original_filename: str
+    mime_type: str
+    position: int = 0
 
 
 class ContentCatalogItem(BaseModel):
@@ -553,8 +563,10 @@ class ContentCatalogItem(BaseModel):
     has_media_upload: bool = False
     has_video_upload: bool = False
     upload_filename: str | None = None
+    uploads: list[VideoUploadInfo] = Field(default_factory=list)
     metrics: VideoMetricsRead
     metrics_priority: str = "normal"
+    old_analysis_count: int = 0
 
     @property
     def video_id(self) -> str:
@@ -565,10 +577,12 @@ VideoCatalogItem = ContentCatalogItem
 
 
 class VideoUploadRead(BaseModel):
+    id: str
     video_id: str
     original_filename: str
     mime_type: str
     file_size: int
+    position: int = 0
     uploaded_at: datetime
 
 
@@ -585,12 +599,27 @@ class MetricsReadiness(BaseModel):
     optional_recommended_for: list[str] = Field(default_factory=list)
 
 
+class PaginationInfo(BaseModel):
+    """Pagination and sort metadata for paginated list responses."""
+
+    page: int = 1
+    per_page: int = 10
+    total: int = 0
+    total_pages: int = 0
+    sort_by: str = "publish_date"
+    sort_order: str = "desc"
+
+
 class ContentAnalyticsPage(BaseModel):
     overview: AccountOverview
     readiness: MetricsReadiness
     videos: list[ContentCatalogItem] = Field(default_factory=list)
     required_field_labels: dict[str, str] = Field(default_factory=dict)
     optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    video_optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    image_optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    carousel_optional_field_labels: dict[str, str] = Field(default_factory=dict)
+    pagination: PaginationInfo | None = None
 
 
 class AnalyzeAllResponse(BaseModel):

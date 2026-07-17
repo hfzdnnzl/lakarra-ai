@@ -45,6 +45,7 @@ def _sample_account() -> TikTokAccountData:
             comments=10,
             shares=5,
             saves=20,
+            photos_viewed=0,
             profile_visits=0,
             followers_gained=0,
             link_clicks=None,

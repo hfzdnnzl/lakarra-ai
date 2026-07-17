@@ -490,6 +490,88 @@ class LiveTikTokProvider(TikTokProvider):
             cursor = data.get("cursor") or 0
         return collected[:max_videos]
 
+    def _fetch_videos_via_tikwmapi(self) -> list[dict]:
+        """Fetch user posts via tikwmapi.com (paid API, free tier available).
+
+        Used as an alternative when tikwm.com's /api/user/posts is unavailable
+        (Cloudflare 403). Requires TIKTOK_API_KEY to be configured.
+        Uses the same response format as the free tikwm.com API.
+        """
+        from ..config import get_settings as _get_settings
+
+        settings = _get_settings()
+        api_key = settings.tiktok_api_key
+        if not api_key:
+            raise TikTokFetchError(
+                "TIKTOK_API_KEY is not configured. "
+                "Set it in your .env file or environment to fetch TikTok post listings "
+                "(get a free key at https://tikwmapi.com/ — 1000 requests/month)."
+            )
+
+        max_videos = settings.tiktok_max_videos
+        # The paid tikwm API lives at api.tikwmapi.com; endpoints are /user/posts,
+        # /user/info, etc. (same format as the free tikwm.com /api/* endpoints).
+        base = "https://api.tikwmapi.com"
+
+        import httpx as _httpx
+
+        collected: list[dict] = []
+        cursor = 0
+        with _httpx.Client(
+            timeout=settings.tiktok_fetch_timeout_seconds,
+            headers={
+                "User-Agent": "Lakarra-Content-Analyst/1.0",
+                "X-TikWMAPI-Key": api_key,
+            },
+            follow_redirects=True,
+        ) as client:
+            while len(collected) < max_videos:
+                batch_size = min(35, max_videos - len(collected))
+                response = client.get(
+                    f"{base}/user/posts",
+                    params={
+                        "unique_id": self._handle,
+                        "count": batch_size,
+                        "cursor": cursor,
+                    },
+                )
+                if response.status_code == 401:
+                    raise TikTokFetchError(
+                        "TikTok API rejected the API key (HTTP 401). "
+                        "Make sure your TIKTOK_API_KEY is correct. "
+                        "Get a key at https://tikwmapi.com/ (free tier available)."
+                    )
+                if response.status_code != 200:
+                    raise TikTokFetchError(
+                        f"TikTok data request failed (HTTP {response.status_code})."
+                    )
+                content_type = response.headers.get("content-type", "")
+                if "json" not in content_type:
+                    raise TikTokFetchError(
+                        f"TikTok API returned unexpected content type '{content_type}'. "
+                        "Check your TIKTOK_API_KEY configuration."
+                    )
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    raise TikTokFetchError(
+                        "TikTok API returned invalid JSON. "
+                        "Check your TIKTOK_API_KEY configuration."
+                    ) from exc
+                if payload.get("code") != 0:
+                    raise TikTokFetchError(
+                        payload.get("msg") or "TikTok data request failed."
+                    )
+                data = payload.get("data", {})
+                batch = data.get("videos") or []
+                if not batch:
+                    break
+                collected.extend(batch)
+                if not data.get("hasMore"):
+                    break
+                cursor = data.get("cursor") or 0
+        return collected[:max_videos]
+
     def _fetch_account_fresh(self) -> tuple[TikTokAccountData, str | None]:
         posts_error: str | None = None
         with _client() as client:
@@ -503,7 +585,12 @@ class LiveTikTokProvider(TikTokProvider):
                     f"@{self._handle} is a private account and cannot be analyzed."
                 )
             try:
-                raw_videos = self._fetch_videos(client)
+                # Use tikwmapi.com with API key when configured (tikwm.com's
+                # /api/user/posts is Cloudflare-blocked for automated requests).
+                if get_settings().tiktok_api_key:
+                    raw_videos = self._fetch_videos_via_tikwmapi()
+                else:
+                    raw_videos = self._fetch_videos(client)
             except TikTokFetchError as exc:
                 logger.warning(
                     "tiktok_live.posts_fetch_failed handle=%s error=%s",
@@ -521,12 +608,18 @@ class LiveTikTokProvider(TikTokProvider):
         )
         return account, posts_error
 
-    def fetch_account(self) -> AccountFetchResult:
-        """Fetch account data, using cache and stale fallback when live fetch fails."""
+    def fetch_account(self, force: bool = False) -> AccountFetchResult:
+        """Fetch account data, using cache and stale fallback when live fetch fails.
 
-        cached = _get_cached_account(self._handle)
-        if cached is not None:
-            return AccountFetchResult(account=cached)
+        Args:
+            force: If True, skip the in-memory cache and always fetch from TikTok live.
+                   Use this when the user explicitly requests a refresh.
+        """
+
+        if not force:
+            cached = _get_cached_account(self._handle)
+            if cached is not None:
+                return AccountFetchResult(account=cached)
 
         live_data_error: str | None = None
         try:
@@ -569,8 +662,8 @@ class LiveTikTokProvider(TikTokProvider):
 
         return AccountFetchResult(account=account, live_data_error=live_data_error)
 
-    def get_account(self) -> TikTokAccountData:
-        return self.fetch_account().account
+    def get_account(self, force: bool = False) -> TikTokAccountData:
+        return self.fetch_account(force=force).account
 
     def get_video(self, video_id: str) -> TikTokVideoData | None:
         account = self.get_account()

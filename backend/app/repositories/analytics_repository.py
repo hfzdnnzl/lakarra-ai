@@ -40,6 +40,9 @@ class AnalyticsRepository:
             self.session.add(row)
         else:
             row.tiktok_handle = handle
+            # Clear cached snapshot when handle changes
+            row.tiktok_snapshot = None
+            row.tiktok_snapshot_fetched_at = None
         return row
 
     def _next_version(self, model: type, **filters) -> int:
@@ -111,6 +114,23 @@ class AnalyticsRepository:
                 latest[row.video_id] = row
         return latest
 
+    def delete_content_analyses_except_latest(self, video_id: str) -> int:
+        """Delete all analyses for a video except the highest-versioned (latest) one.
+        Returns the number of deleted rows.
+        """
+        latest = self.get_latest_analysis_for_video(video_id)
+        if latest is None:
+            return 0
+
+        stmt = select(ContentAnalysisORM).where(
+            ContentAnalysisORM.video_id == video_id,
+            ContentAnalysisORM.id != latest.id,
+        )
+        old_rows = list(self.session.scalars(stmt))
+        for row in old_rows:
+            self.session.delete(row)
+        return len(old_rows)
+
     # --- Video metrics (user-editable) -------------------------------------
     def get_video_metrics(self, video_id: str) -> VideoMetricsORM | None:
         stmt = select(VideoMetricsORM).where(VideoMetricsORM.video_id == video_id)
@@ -138,11 +158,19 @@ class AnalyticsRepository:
         return list(self.session.scalars(stmt))
 
     # --- Video uploads (analytics direct upload) ---------------------------
-    def get_video_upload(self, video_id: str) -> VideoUploadORM | None:
-        stmt = select(VideoUploadORM).where(VideoUploadORM.video_id == video_id)
+    def get_video_uploads(self, video_id: str) -> list[VideoUploadORM]:
+        stmt = (
+            select(VideoUploadORM)
+            .where(VideoUploadORM.video_id == video_id)
+            .order_by(VideoUploadORM.position)
+        )
+        return list(self.session.scalars(stmt))
+
+    def get_video_upload(self, upload_id: str) -> VideoUploadORM | None:
+        stmt = select(VideoUploadORM).where(VideoUploadORM.id == upload_id)
         return self.session.scalar(stmt)
 
-    def upsert_video_upload(
+    def add_video_upload(
         self,
         *,
         video_id: str,
@@ -151,36 +179,40 @@ class AnalyticsRepository:
         mime_type: str,
         file_size: int,
         original_filename: str,
+        position: int = 0,
     ) -> VideoUploadORM:
-        row = self.get_video_upload(video_id)
-        if row is None:
-            row = VideoUploadORM(
-                id=_new_id(),
-                video_id=video_id,
-                tiktok_handle=tiktok_handle,
-                storage_key=storage_key,
-                mime_type=mime_type,
-                file_size=file_size,
-                original_filename=original_filename,
-            )
-            self.session.add(row)
-        else:
-            row.tiktok_handle = tiktok_handle
-            row.storage_key = storage_key
-            row.mime_type = mime_type
-            row.file_size = file_size
-            row.original_filename = original_filename
+        row = VideoUploadORM(
+            id=_new_id(),
+            video_id=video_id,
+            tiktok_handle=tiktok_handle,
+            storage_key=storage_key,
+            mime_type=mime_type,
+            file_size=file_size,
+            original_filename=original_filename,
+            position=position,
+        )
+        self.session.add(row)
         return row
 
-    def delete_video_upload(self, video_id: str) -> VideoUploadORM | None:
-        row = self.get_video_upload(video_id)
+    def delete_video_upload(self, upload_id: str) -> VideoUploadORM | None:
+        row = self.get_video_upload(upload_id)
         if row is None:
             return None
         self.session.delete(row)
         return row
 
+    def delete_all_video_uploads(self, video_id: str) -> list[VideoUploadORM]:
+        rows = self.get_video_uploads(video_id)
+        for row in rows:
+            self.session.delete(row)
+        return rows
+
     def list_video_uploads(self, *, tiktok_handle: str) -> list[VideoUploadORM]:
-        stmt = select(VideoUploadORM).where(VideoUploadORM.tiktok_handle == tiktok_handle)
+        stmt = (
+            select(VideoUploadORM)
+            .where(VideoUploadORM.tiktok_handle == tiktok_handle)
+            .order_by(VideoUploadORM.video_id, VideoUploadORM.position)
+        )
         return list(self.session.scalars(stmt))
 
     # --- Competitor Analysis -----------------------------------------------
@@ -420,3 +452,29 @@ class AnalyticsRepository:
             .limit(limit)
         )
         return list(self.session.scalars(stmt))
+
+    # --- TikTok account snapshot -------------------------------------------
+    def get_snapshot(self) -> dict | None:
+        """Return the cached TikTok account snapshot (JSON blob), or None."""
+        row = self.get_account_settings()
+        if row is None:
+            return None
+        return row.tiktok_snapshot
+
+    def get_snapshot_fetched_at(self):
+        """Return the datetime the snapshot was last fetched, or None."""
+        row = self.get_account_settings()
+        if row is None:
+            return None
+        return row.tiktok_snapshot_fetched_at
+
+    def save_snapshot(self, data: dict) -> None:
+        """Persist a TikTok account snapshot and update the fetched-at timestamp."""
+        from datetime import datetime, timezone
+
+        row = self.get_account_settings()
+        if row is None:
+            row = AnalyticsAccountSettingsORM(id="default")
+            self.session.add(row)
+        row.tiktok_snapshot = data
+        row.tiktok_snapshot_fetched_at = datetime.now(timezone.utc)

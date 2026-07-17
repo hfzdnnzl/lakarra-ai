@@ -14,7 +14,7 @@ from app.services.media_resolver import resolve_media_source, resolve_video_sour
 @pytest.fixture
 def analytics_upload(db_session: Session) -> bytes:
     repo = AnalyticsRepository(db_session)
-    repo.upsert_video_upload(
+    repo.add_video_upload(
         video_id="lk-001",
         tiktok_handle="lakarra",
         storage_key="analytics/lk-001/test.mp4",

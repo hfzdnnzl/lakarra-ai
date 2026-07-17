@@ -30,6 +30,7 @@ from ..models.analytics import (
     ContentCatalogItem,
     HistoricalAnalytics,
     MetricsReadiness,
+    PaginationInfo,
     PerformanceMetrics,
     ReviewDecision,
     ReviewQueueItem,
@@ -37,6 +38,7 @@ from ..models.analytics import (
     VideoInfo,
     VideoMetricsData,
     VideoMetricsRead,
+    VideoUploadInfo,
     VideoUploadRead,
     normalize_tiktok_handle,
 )
@@ -58,14 +60,18 @@ from ..repositories.analytics_repository import AnalyticsRepository
 from ..repositories.content_repository import ContentRepository
 from .analysis_merge import merge_passes, project_content_analysis_summary
 from .content_metrics import (
+    CAROUSEL_OPTIONAL_METRIC_FIELDS,
+    IMAGE_OPTIONAL_METRIC_FIELDS,
     METRIC_FIELD_LABELS,
     OPTIONAL_METRIC_FIELDS,
     REQUIRED_METRIC_FIELDS,
+    VIDEO_OPTIONAL_METRIC_FIELDS,
     apply_metrics_to_performance,
     content_display_label,
     metrics_complete,
     metrics_from_row,
     missing_required,
+    optional_fields_for,
     resolve_publish_metadata,
     video_display_label,
 )
@@ -90,6 +96,42 @@ def _video_meta_from_payload(payload: dict) -> dict:
         if isinstance(post, dict):
             return post
     return {}
+
+
+def _account_to_dict(account: TikTokAccountData) -> dict:
+    """Serialize a TikTokAccountData dataclass into a JSON-safe dict."""
+    return {
+        "handle": account.handle,
+        "follower_count": account.follower_count,
+        "videos": [
+            {
+                "video": v.video.model_dump(),
+                "performance": v.performance.model_dump(),
+                "comments": v.comments,
+                "download_url": v.download_url,
+            }
+            for v in account.videos
+        ],
+    }
+
+
+def _account_from_dict(data: dict) -> TikTokAccountData:
+    """Reconstruct a TikTokAccountData dataclass from a dict (see _account_to_dict)."""
+    from ..models.analytics import PerformanceMetrics, VideoInfo
+
+    return TikTokAccountData(
+        handle=data["handle"],
+        follower_count=data.get("follower_count", 0),
+        videos=[
+            TikTokVideoData(
+                video=VideoInfo(**v["video"]),
+                performance=PerformanceMetrics(**v["performance"]),
+                comments=v.get("comments", []),
+                download_url=v.get("download_url", ""),
+            )
+            for v in data.get("videos", [])
+        ],
+    )
 
 
 class AnalyticsService:
@@ -156,16 +198,22 @@ class AnalyticsService:
         return handle
 
     def _fetch_account(
-        self, handle: str
+        self, handle: str, *, force: bool = False
     ) -> tuple[TikTokAccountData | None, str | None]:
-        """Fetch TikTok account data; returns (account, optional live_data_error)."""
+        """Fetch TikTok account data; returns (account, optional live_data_error).
+
+        Args:
+            handle: The TikTok @handle to fetch data for.
+            force: If True, bypass the in-memory cache and always fetch live from TikTok.
+                   Used by the explicit "Refresh from TikTok" flow.
+        """
 
         account: TikTokAccountData | None = None
         live_data_error: str | None = None
         provider = build_tiktok_provider(handle)
         if isinstance(provider, LiveTikTokProvider):
             try:
-                result = provider.fetch_account()
+                result = provider.fetch_account(force=force)
                 account = result.account
                 live_data_error = result.live_data_error
             except TikTokFetchError as exc:
@@ -402,6 +450,7 @@ class AnalyticsService:
         optional_recommended: list[str] = []
         for video in account.videos:
             vid = video.video.video_id
+            content_type = getattr(video.video, "content_type", ContentType.VIDEO)
             row = metrics_map.get(vid)
             data = metrics_from_row(row)
             if metrics_complete(data):
@@ -417,8 +466,9 @@ class AnalyticsService:
                     }
                 )
             if vid in priority_ids:
+                optional_fields = optional_fields_for(content_type)
                 optional_missing = [
-                    f for f in OPTIONAL_METRIC_FIELDS if data.get(f) is None
+                    f for f in optional_fields if data.get(f) is None
                 ]
                 if optional_missing:
                     optional_recommended.append(vid)
@@ -476,17 +526,31 @@ class AnalyticsService:
         self, handle: str, account: TikTokAccountData
     ) -> list[ContentCatalogItem]:
         analyses = self.repo.get_latest_analyses_map()
+
+        # Pre-compute old-analysis counts per video (rows minus the latest).
+        all_analysis_rows = self.repo.list_content_analyses(limit=500)
+        analysis_count_except_latest: dict[str, int] = {}
+        for row in all_analysis_rows:
+            if row.video_id not in analysis_count_except_latest:
+                analysis_count_except_latest[row.video_id] = 0
+            else:
+                analysis_count_except_latest[row.video_id] += 1
+
         sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
         priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
         metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
-        uploads_map = {u.video_id: u for u in self.repo.list_video_uploads(tiktok_handle=handle)}
+        all_uploads = self.repo.list_video_uploads(tiktok_handle=handle)
+        uploads_map: dict[str, list[VideoUploadORM]] = {}
+        for u in all_uploads:
+            uploads_map.setdefault(u.video_id, []).append(u)
 
         catalog: list[VideoCatalogItem] = []
         for video in account.videos:
             vid = video.video.video_id
             priority = "high" if vid in priority_ids else "normal"
             row = metrics_map.get(vid)
-            upload = uploads_map.get(vid)
+            vid_uploads = uploads_map.get(vid, [])
+            first_upload = vid_uploads[0] if vid_uploads else None
             latest = analyses.get(vid)
             payload = latest.payload if latest else {}
             publish_date, publish_time = resolve_publish_metadata(
@@ -519,11 +583,13 @@ class AnalyticsService:
                     analysis_version=latest.version if latest else None,
                     analysis_id=latest.id if latest else None,
                     analysis=analysis_summary,
-                    has_media_upload=upload is not None,
-                    has_video_upload=upload is not None,
-                    upload_filename=upload.original_filename if upload else None,
+                    has_media_upload=first_upload is not None,
+                    has_video_upload=first_upload is not None,
+                    upload_filename=first_upload.original_filename if first_upload else None,
+                    uploads=[VideoUploadInfo(id=u.id, original_filename=u.original_filename, mime_type=u.mime_type, position=u.position) for u in vid_uploads],
                     metrics=self._metrics_read(vid, row, priority=priority),
                     metrics_priority=priority,
+                    old_analysis_count=analysis_count_except_latest.get(vid, 0),
                 )
             )
         return catalog
@@ -548,46 +614,106 @@ class AnalyticsService:
         if not self._video_known(handle, video_id):
             raise NotFoundError(f"Video '{video_id}' not found.")
 
-        existing = self.repo.get_video_upload(video_id)
-        if existing is not None:
-            try:
-                get_storage().delete(existing.storage_key)
-            except OSError:
-                logger.warning("upload.delete_old_failed video_id=%s", video_id)
+        # Determine content type to decide replace-vs-append behaviour
+        content_type = self._get_video_content_type(handle, video_id)
+
+        if content_type != "CAROUSEL":
+            # For VIDEO and IMAGE: replace old upload
+            existing_uploads = self.repo.get_video_uploads(video_id)
+            for existing in existing_uploads:
+                try:
+                    get_storage().delete(existing.storage_key)
+                except OSError:
+                    logger.warning("upload.delete_old_failed upload_id=%s", existing.id)
+                self.session.delete(existing)
+            self.session.flush()
+            position = 0
+        else:
+            # For CAROUSEL: append as next image
+            existing = self.repo.get_video_uploads(video_id)
+            position = len(existing)
 
         storage_key = (
             f"analytics/{video_id}/{uuid4().hex}_{_safe_filename(original_filename)}"
         )
         get_storage().put_object(storage_key, data, content_type=mime_type)
-        row = self.repo.upsert_video_upload(
+        row = self.repo.add_video_upload(
             video_id=video_id,
             tiktok_handle=handle,
             storage_key=storage_key,
             mime_type=mime_type,
             file_size=len(data),
             original_filename=_safe_filename(original_filename),
+            position=position,
         )
         self.session.commit()
         return VideoUploadRead(
+            id=row.id,
             video_id=video_id,
             original_filename=row.original_filename,
             mime_type=row.mime_type,
             file_size=row.file_size,
+            position=row.position,
             uploaded_at=row.updated_at,
         )
 
-    def get_video_upload_row(self, video_id: str):
-        return self.repo.get_video_upload(video_id)
+    def get_video_upload_row(self, upload_id: str):
+        return self.repo.get_video_upload(upload_id)
 
-    def delete_video_upload(self, video_id: str) -> None:
-        row = self.repo.delete_video_upload(video_id)
+    def get_video_upload_row_for_video(self, video_id: str):
+        """Return the first upload ORM row for a video (backwards compat)."""
+        uploads = self.repo.get_video_uploads(video_id)
+        return uploads[0] if uploads else None
+
+    def get_video_uploads(self, video_id: str) -> list[VideoUploadRead]:
+        rows = self.repo.get_video_uploads(video_id)
+        return [
+            VideoUploadRead(
+                id=r.id,
+                video_id=r.video_id,
+                original_filename=r.original_filename,
+                mime_type=r.mime_type,
+                file_size=r.file_size,
+                position=r.position,
+                uploaded_at=r.updated_at,
+            )
+            for r in rows
+        ]
+
+    def delete_video_upload(self, upload_id: str) -> None:
+        row = self.repo.get_video_upload(upload_id)
         if row is None:
-            raise NotFoundError(f"No upload found for video '{video_id}'.")
+            raise NotFoundError(f"Upload '{upload_id}' not found.")
         try:
             get_storage().delete(row.storage_key)
         except OSError:
-            logger.warning("upload.delete_storage_failed video_id=%s", video_id)
+            logger.warning("upload.delete_storage_failed upload_id=%s", upload_id)
+        self.session.delete(row)
         self.session.commit()
+
+    def delete_all_video_uploads(self, video_id: str) -> int:
+        rows = self.repo.delete_all_video_uploads(video_id)
+        for row in rows:
+            try:
+                get_storage().delete(row.storage_key)
+            except OSError:
+                logger.warning("upload.delete_storage_failed upload_id=%s", row.id)
+        self.session.commit()
+        return len(rows)
+
+    def _get_video_content_type(self, handle: str, video_id: str) -> str:
+        """Infer content type from the TikTok account data."""
+        try:
+            provider = build_tiktok_provider(handle)
+            account = provider.get_account(handle)
+            for video in account.videos:
+                if video.video.video_id == video_id:
+                    ct = getattr(video.video, "content_type", None)
+                    if ct:
+                        return ct.value if hasattr(ct, "value") else str(ct)
+        except Exception:
+            pass
+        return "VIDEO"
 
     # --- Video metrics & catalog -------------------------------------------
     def _sync_public_metrics(self, handle: str, video: TikTokVideoData) -> None:
@@ -657,56 +783,430 @@ class AnalyticsService:
                 f"{f' — e.g. {missing_titles}' if missing_titles else ''}."
             )
 
-    def get_content_page(self) -> ContentAnalyticsPage:
+    def get_content_page(
+        self,
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> ContentAnalyticsPage:
         settings = self.get_account_settings()
-        labels = {
+        labels = self._page_labels()
+        if not settings.configured or not settings.tiktok_handle:
+            return self._empty_page(None, labels, pagination=PaginationInfo(
+                page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            ))
+
+        handle = settings.tiktok_handle
+
+        # Try to serve from cached DB snapshot — avoids a live TikTok API call.
+        snapshot = self.repo.get_snapshot()
+        if snapshot is not None:
+            try:
+                account = _account_from_dict(snapshot)
+                return self._build_page_from_account(
+                    handle, account, labels,
+                    live_data_error=None,
+                    sort_by=sort_by, sort_order=sort_order,
+                    page=page, per_page=per_page,
+                )
+            except Exception:
+                logger.warning("get_content_page.snapshot_parse_failed", exc_info=True)
+
+        # No snapshot yet — fetch from TikTok, cache it, then serve.
+        return self._fetch_and_cache_page(handle, labels, sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page)
+
+    def refresh_content_page(
+        self,
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> ContentAnalyticsPage:
+        """Force a live TikTok fetch, update the DB snapshot, and return the page."""
+        settings = self.get_account_settings()
+        labels = self._page_labels()
+        if not settings.configured or not settings.tiktok_handle:
+            return self._empty_page(None, labels, pagination=PaginationInfo(
+                page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            ))
+        return self._fetch_and_cache_page(
+            settings.tiktok_handle, labels,
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page,
+            force=True,  # Explicit refresh — always bypass the in-memory cache
+        )
+
+    # -- helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _page_labels() -> dict:
+        return {
             "required_field_labels": {
                 k: METRIC_FIELD_LABELS[k] for k in REQUIRED_METRIC_FIELDS
             },
             "optional_field_labels": {
                 k: METRIC_FIELD_LABELS[k] for k in OPTIONAL_METRIC_FIELDS
             },
+            "video_optional_field_labels": {
+                k: METRIC_FIELD_LABELS[k] for k in VIDEO_OPTIONAL_METRIC_FIELDS
+            },
+            "image_optional_field_labels": {
+                k: METRIC_FIELD_LABELS[k] for k in IMAGE_OPTIONAL_METRIC_FIELDS
+            },
+            "carousel_optional_field_labels": {
+                k: METRIC_FIELD_LABELS[k] for k in CAROUSEL_OPTIONAL_METRIC_FIELDS
+            },
         }
-        if not settings.configured or not settings.tiktok_handle:
-            overview = AccountOverview(tiktok_handle=None, account_configured=False)
-            return ContentAnalyticsPage(
-                overview=overview,
-                readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
-                videos=[],
-                **labels,
-            )
 
-        handle = settings.tiktok_handle
-        account, live_data_error = self._fetch_account(handle)
+    def _empty_page(
+        self,
+        handle: str | None,
+        labels: dict,
+        *,
+        pagination: PaginationInfo | None = None,
+    ) -> ContentAnalyticsPage:
+        overview = AccountOverview(tiktok_handle=handle, account_configured=handle is not None)
+        return ContentAnalyticsPage(
+            overview=overview,
+            readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
+            videos=[],
+            pagination=pagination,
+            **labels,
+        )
+
+    def _fetch_and_cache_page(
+        self,
+        handle: str,
+        labels: dict,
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+        force: bool = False,
+    ) -> ContentAnalyticsPage:
+        """Fetch from TikTok API, persist snapshot, build and return the page.
+
+        Args:
+            force: If True, bypass the in-memory cache and always fetch live from TikTok.
+        """
+        account, live_data_error = self._fetch_account(handle, force=force)
         if account is None:
-            overview = AccountOverview(
-                tiktok_handle=handle,
-                account_configured=True,
-                live_data_error=live_data_error,
-            )
-            return ContentAnalyticsPage(
-                overview=overview,
-                readiness=MetricsReadiness(ready=False, total_videos=0, complete_videos=0),
-                videos=[],
-                **labels,
-            )
+            return self._empty_page(handle, labels, pagination=PaginationInfo(
+                page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            ))
 
-        for video in account.videos:
-            self._sync_public_metrics(handle, video)
+        # Persist snapshot so subsequent loads skip the TikTok API call.
+        self.repo.save_snapshot(_account_to_dict(account))
         self.session.commit()
 
-        overview = self._build_overview_from_account(
-            handle, account, live_data_error=live_data_error
+        return self._build_page_from_account(
+            handle, account, labels, live_data_error=live_data_error,
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page,
         )
-        readiness = self._compute_metrics_readiness(handle, account)
-        catalog = self._build_video_catalog(handle, account)
+
+    def _build_page_from_account(
+        self,
+        handle: str,
+        account: TikTokAccountData,
+        labels: dict,
+        *,
+        live_data_error: str | None = None,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> ContentAnalyticsPage:
+        # --- batch-load all reference data in 3 queries (not N queries) ---
+        metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
+        all_uploads = self.repo.list_video_uploads(tiktok_handle=handle)
+        uploads_map_page: dict[str, list[VideoUploadORM]] = {}
+        for u in all_uploads:
+            uploads_map_page.setdefault(u.video_id, []).append(u)
+        uploads_map_legacy: dict[str, VideoUploadORM] = {u.video_id: u for u in all_uploads}
+        analyses = self.repo.get_latest_analyses_map()
+
+        # Pre-compute old-analysis counts per video (all rows minus the latest).
+        all_analysis_rows = self.repo.list_content_analyses(limit=500)
+        analysis_count_except_latest: dict[str, int] = {}
+        for row in all_analysis_rows:
+            if row.video_id not in analysis_count_except_latest:
+                analysis_count_except_latest[row.video_id] = 0
+            else:
+                analysis_count_except_latest[row.video_id] += 1
+
+        # Seed public metrics for new videos (batched, then reload the map).
+        new_ids = {v.video.video_id for v in account.videos if v.video.video_id not in metrics_map}
+        for video in account.videos:
+            if video.video.video_id in new_ids:
+                perf = video.performance
+                self.repo.upsert_video_metrics(
+                    video_id=video.video.video_id, tiktok_handle=handle,
+                    data={
+                        "views": perf.views, "likes": perf.likes,
+                        "comments": perf.comments, "shares": perf.shares,
+                        "saves": perf.saves, "reach": perf.reach or None,
+                        "watch_time": perf.watch_time or None,
+                        "average_watch_duration": perf.average_watch_duration or None,
+                        "completion_rate": perf.completion_rate or None,
+                        "profile_visits": perf.profile_visits or None,
+                        "followers_gained": perf.followers_gained or None,
+                        "link_clicks": perf.link_clicks,
+                    },
+                )
+        if new_ids:
+            self.session.commit()
+            metrics_map = {m.video_id: m for m in self.repo.list_video_metrics(tiktok_handle=handle)}
+
+        # --- single pass: accumulate overview data, readiness, and catalog ---
+        sorted_videos = sorted(account.videos, key=lambda v: v.performance.views, reverse=True)
+        priority_ids = {v.video.video_id for v in sorted_videos[:3] + sorted_videos[-3:]}
+
+        total_views = 0
+        engagements: list[float] = []
+        incomplete: list[dict] = []
+        missing_media: list[dict] = []
+        complete = 0
+        media_complete = 0
+        optional_recommended: list[str] = []
+        catalog: list[ContentCatalogItem] = []
+
+        for video in account.videos:
+            vid = video.video.video_id
+            perf = video.performance
+            row = metrics_map.get(vid)
+            vid_uploads = uploads_map_page.get(vid, [])
+            upload = vid_uploads[0] if vid_uploads else None
+            latest = analyses.get(vid)
+            priority = "high" if vid in priority_ids else "normal"
+
+            # overview accumulators
+            total_views += perf.views
+            engagements.append(
+                (perf.likes + perf.comments + perf.shares + perf.saves) / max(perf.views, 1)
+            )
+
+            # readiness data
+            data = metrics_from_row(row)
+            if metrics_complete(data):
+                complete += 1
+            else:
+                incomplete.append({
+                    "video_id": vid,
+                    "title": video_display_label(
+                        title=video.video.title, caption=video.video.caption,
+                    ),
+                    "missing_required": missing_required(data),
+                })
+            if vid in priority_ids:
+                ct = getattr(video.video, "content_type", ContentType.VIDEO)
+                optional_missing = [f for f in optional_fields_for(ct) if data.get(f) is None]
+                if optional_missing:
+                    optional_recommended.append(vid)
+
+            has_media = upload is not None
+            if has_media:
+                media_complete += 1
+            else:
+                ct = getattr(video.video, "content_type", ContentType.VIDEO)
+                missing_media.append({
+                    "video_id": vid,
+                    "title": video_display_label(
+                        title=video.video.title, caption=video.video.caption,
+                    ),
+                    "content_type": ct.value,
+                })
+
+            # catalog item
+            publish_date, publish_time = resolve_publish_metadata(
+                row,
+                default_date=video.video.publish_date,
+                default_time=video.video.publish_time,
+            )
+            payload = latest.payload if latest else {}
+            analysis_summary = None
+            if latest:
+                try:
+                    analysis_summary = project_content_analysis_summary(
+                        ContentAnalysis.model_validate(payload),
+                    )
+                except Exception:
+                    analysis_summary = None
+            catalog.append(
+                ContentCatalogItem(
+                    post_id=vid,
+                    content_type=getattr(video.video, "content_type", ContentType.VIDEO),
+                    title=video_display_label(
+                        title=video.video.title, caption=video.video.caption,
+                    ),
+                    url=video.video.url,
+                    caption=video.video.caption,
+                    publish_date=publish_date,
+                    publish_time=publish_time,
+                    duration=video.video.duration,
+                    thumbnail=video.video.thumbnail,
+                    is_analyzed=latest is not None,
+                    analysis_version=latest.version if latest else None,
+                    analysis_id=latest.id if latest else None,
+                    analysis=analysis_summary,
+                    has_media_upload=upload is not None,
+                    has_video_upload=upload is not None,
+                    upload_filename=upload.original_filename if upload else None,
+                    uploads=[VideoUploadInfo(id=u.id, original_filename=u.original_filename, mime_type=u.mime_type, position=u.position) for u in vid_uploads],
+                    metrics=self._metrics_read(vid, row, priority=priority),
+                    metrics_priority=priority,
+                    old_analysis_count=analysis_count_except_latest.get(vid, 0),
+                )
+            )
+
+        # --- build overview from accumulated data ---
+        avg_engagement = sum(engagements) / max(len(engagements), 1)
+        recent = [
+            {
+                "video_id": v.video.video_id,
+                "title": video_display_label(
+                    title=v.video.title, caption=v.video.caption,
+                ),
+                "views": v.performance.views,
+                "category": v.video.content_category,
+                "publish_date": v.video.publish_date,
+            }
+            for v in account.videos[-5:]
+        ]
+        best = [
+            {
+                "video_id": v.video.video_id,
+                "title": video_display_label(
+                    title=v.video.title, caption=v.video.caption,
+                ),
+                "views": v.performance.views,
+                "engagement_rate": round(
+                    (v.performance.likes + v.performance.comments)
+                    / max(v.performance.views, 1),
+                    4,
+                ),
+            }
+            for v in sorted_videos[:3]
+        ]
+        worst = [
+            {
+                "video_id": v.video.video_id,
+                "title": video_display_label(
+                    title=v.video.title, caption=v.video.caption,
+                ),
+                "views": v.performance.views,
+            }
+            for v in sorted_videos[-3:]
+        ]
+        heatmap: dict[str, int] = {}
+        for v in account.videos:
+            day = v.video.publish_date[:10] if v.video.publish_date else "unknown"
+            hour = v.video.publish_time[:2] if v.video.publish_time else "00"
+            key = f"{day}|{hour}"
+            heatmap[key] = heatmap.get(key, 0) + v.performance.views
+        trends = [
+            {
+                "video_id": v.video.video_id,
+                "title": video_display_label(
+                    title=v.video.title, caption=v.video.caption,
+                ),
+                "views": v.performance.views,
+                "publish_date": v.video.publish_date,
+            }
+            for v in account.videos
+        ]
+
+        snapshots = self.repo.list_metrics_snapshots(limit=10)
+        health_scores = [s for s in snapshots if s.metric == "account_health_score"]
+        health = health_scores[0].value if health_scores else round(avg_engagement * 10, 2)
+
+        overview = AccountOverview(
+            tiktok_handle=handle,
+            account_configured=True,
+            live_data_error=live_data_error,
+            account_health_score=min(health, 1.0) if health <= 1 else health / 10,
+            total_videos=len(account.videos),
+            total_views=total_views,
+            avg_engagement_rate=round(avg_engagement, 4),
+            recent_videos=recent,
+            best_performers=best,
+            worst_performers=worst,
+            posting_heatmap=heatmap,
+            performance_trends=trends,
+            growth_trends=[{"followers": account.follower_count, "period": "current"}],
+        )
+
+        readiness = MetricsReadiness(
+            ready=(
+                complete == len(account.videos)
+                and media_complete == len(account.videos)
+                and len(account.videos) > 0
+            ),
+            media_ready=media_complete == len(account.videos) and len(account.videos) > 0,
+            total_videos=len(account.videos),
+            complete_videos=complete,
+            media_complete_videos=media_complete,
+            incomplete_videos=incomplete,
+            missing_media_videos=missing_media,
+            required_fields=list(REQUIRED_METRIC_FIELDS),
+            optional_fields=list(OPTIONAL_METRIC_FIELDS),
+            optional_recommended_for=optional_recommended,
+        )
+
+        sorted_catalog, pagination = self._sort_and_paginate(
+            catalog, sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page,
+        )
 
         return ContentAnalyticsPage(
             overview=overview,
             readiness=readiness,
-            videos=catalog,
+            videos=sorted_catalog,
+            pagination=pagination,
             **labels,
         )
+
+    @staticmethod
+    def _sort_and_paginate(
+        catalog: list[ContentCatalogItem],
+        *,
+        sort_by: str = "publish_date",
+        sort_order: str = "desc",
+        page: int = 1,
+        per_page: int = 10,
+    ) -> tuple[list[ContentCatalogItem], PaginationInfo]:
+        reverse = sort_order == "desc"
+
+        if sort_by == "publish_date":
+            def sort_key(item: ContentCatalogItem) -> tuple:
+                return (item.publish_date, item.publish_time)
+        elif sort_by == "views":
+            def sort_key(item: ContentCatalogItem) -> int:
+                return item.metrics.views or 0
+        elif sort_by == "likes":
+            def sort_key(item: ContentCatalogItem) -> int:
+                return item.metrics.likes or 0
+        else:
+            def sort_key(item: ContentCatalogItem) -> tuple:
+                return (item.publish_date, item.publish_time)
+
+        sorted_list = sorted(catalog, key=sort_key, reverse=reverse)
+        total = len(sorted_list)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        start = (page - 1) * per_page
+        end = start + per_page
+        page_items = sorted_list[start:end]
+
+        pagination = PaginationInfo(
+            page=page,
+            per_page=per_page,
+            total=total,
+            total_pages=total_pages,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        return page_items, pagination
 
     def update_video_metrics(self, video_id: str, body: VideoMetricsData) -> VideoMetricsRead:
         handle = self._require_handle()
@@ -1340,3 +1840,14 @@ class AnalyticsService:
                     value=float(value),
                     dimension=vid,
                 )
+
+    def prune_old_analyses(self, video_id: str) -> int:
+        """Delete all analysis versions for a video except the latest.
+        Returns the number of deleted rows. Raises NotFoundError if no analysis exists.
+        """
+        latest = self.repo.get_latest_analysis_for_video(video_id)
+        if latest is None:
+            raise NotFoundError(f"No analysis found for video '{video_id}'.")
+        deleted = self.repo.delete_content_analyses_except_latest(video_id)
+        self.session.commit()
+        return deleted

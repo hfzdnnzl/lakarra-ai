@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -142,12 +142,53 @@ async def upload_video(
         raise
 
 
+@router.post("/videos/{video_id}/uploads", response_model=list[VideoUploadRead], status_code=201)
+async def upload_multiple_files(
+    video_id: str,
+    files: list[UploadFile] = File(...),
+    service: AnalyticsService = Depends(_service),
+) -> list[VideoUploadRead]:
+    results: list[VideoUploadRead] = []
+    errors: list[str] = []
+    for file in files:
+        try:
+            data = await file.read()
+            mime = file.content_type or "application/octet-stream"
+            result = service.upload_video_file(
+                video_id,
+                data=data,
+                mime_type=mime,
+                original_filename=file.filename or "upload.jpg",
+            )
+            results.append(result)
+        except ValueError as exc:
+            errors.append(f"{file.filename}: {exc}")
+        except Exception as exc:
+            from ...errors import LakarraError
+            if isinstance(exc, LakarraError):
+                errors.append(f"{file.filename}: {exc.message}")
+            else:
+                raise
+    if errors and not results:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+    return results
+
+
+@router.get("/videos/{video_id}/uploads", response_model=list[VideoUploadRead])
+def list_video_uploads(
+    video_id: str,
+    service: AnalyticsService = Depends(_service),
+) -> list[VideoUploadRead]:
+    return service.get_video_uploads(video_id)
+
+
 @router.get("/videos/{video_id}/upload/stream")
 def stream_video_upload(
     video_id: str,
+    upload_id: str | None = None,
     service: AnalyticsService = Depends(_service),
 ):
-    row = service.get_video_upload_row(video_id)
+    row = service.get_video_upload_row(upload_id) if upload_id else service.get_video_upload_row_for_video(video_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Upload not found")
     local_path = get_storage().get_local_path(row.storage_key)
@@ -172,10 +213,15 @@ def stream_video_upload(
 @router.delete("/videos/{video_id}/upload", status_code=204)
 def delete_video_upload(
     video_id: str,
+    upload_id: str | None = None,
     service: AnalyticsService = Depends(_service),
 ) -> None:
     try:
-        service.delete_video_upload(video_id)
+        if upload_id:
+            service.delete_video_upload(upload_id)
+        else:
+            # Backwards compat: delete all uploads for this video
+            service.delete_all_video_uploads(video_id)
     except Exception as exc:
         from ...errors import LakarraError
 
@@ -289,10 +335,51 @@ def get_overview(service: AnalyticsService = Depends(_service)) -> AccountOvervi
         raise
 
 
+SORT_BY_VALUES = ["publish_date", "views", "likes"]
+SORT_ORDER_VALUES = ["asc", "desc"]
+
+
 @router.get("/content", response_model=ContentAnalyticsPage)
-def get_content_analytics(service: AnalyticsService = Depends(_service)) -> ContentAnalyticsPage:
+def get_content_analytics(
+    service: AnalyticsService = Depends(_service),
+    sort_by: str = Query("publish_date", description="Sort field"),
+    sort_order: str = Query("desc", description="asc or desc"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
+) -> ContentAnalyticsPage:
+    if sort_by not in SORT_BY_VALUES:
+        sort_by = "publish_date"
+    if sort_order not in SORT_ORDER_VALUES:
+        sort_order = "desc"
     try:
-        return service.get_content_page()
+        return service.get_content_page(
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page
+        )
+    except Exception as exc:
+        from ...errors import LakarraError
+
+        if isinstance(exc, LakarraError):
+            raise HTTPException(status_for(exc.error_type), detail=exc.message) from exc
+        raise
+
+
+@router.post("/content/refresh", response_model=ContentAnalyticsPage)
+def refresh_content_analytics(
+    service: AnalyticsService = Depends(_service),
+    sort_by: str = Query("publish_date", description="Sort field"),
+    sort_order: str = Query("desc", description="asc or desc"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
+) -> ContentAnalyticsPage:
+    """Force a live TikTok fetch, update the DB snapshot, and return the page."""
+    if sort_by not in SORT_BY_VALUES:
+        sort_by = "publish_date"
+    if sort_order not in SORT_ORDER_VALUES:
+        sort_order = "desc"
+    try:
+        return service.refresh_content_page(
+            sort_by=sort_by, sort_order=sort_order, page=page, per_page=per_page
+        )
     except Exception as exc:
         from ...errors import LakarraError
 
@@ -329,3 +416,18 @@ def get_historical(service: AnalyticsService = Depends(_service)) -> HistoricalA
 def list_metrics(service: AnalyticsService = Depends(_service)) -> list[dict]:
     historical = service.get_historical()
     return [s.model_dump(mode="json") for s in historical.metrics_snapshots]
+
+
+@router.post("/content/{post_id}/analysis/prune")
+def prune_content_analyses(
+    post_id: str,
+    service: AnalyticsService = Depends(_service),
+) -> dict:
+    """Delete all analysis versions for a video except the latest one."""
+    from ...errors import NotFoundError as LakarraNotFoundError
+
+    try:
+        deleted = service.prune_old_analyses(post_id)
+        return {"deleted": deleted}
+    except LakarraNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc

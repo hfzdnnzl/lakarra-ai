@@ -394,12 +394,20 @@ class MetricsSnapshotORM(TimestampMixin, Base):
 
 
 class AnalyticsAccountSettingsORM(TimestampMixin, Base):
-    """Singleton row storing the connected Lakarra TikTok account handle."""
+    """Singleton row storing the connected Lakarra TikTok account handle
+    and a cached snapshot of TikTok account data (videos, follower count, metrics).
+    The snapshot is populated on first fetch or explicit refresh; normal page loads
+    read from the snapshot rather than calling the TikTok API live.
+    """
 
     __tablename__ = "analytics_account_settings"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
     tiktok_handle: Mapped[str] = mapped_column(String(128), default="")
+    tiktok_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    tiktok_snapshot_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
 
 class VideoMetricsORM(TimestampMixin, Base):
@@ -421,6 +429,7 @@ class VideoMetricsORM(TimestampMixin, Base):
     watch_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     average_watch_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     completion_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    photos_viewed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     profile_visits: Mapped[int | None] = mapped_column(Integer, nullable=True)
     followers_gained: Mapped[int | None] = mapped_column(Integer, nullable=True)
     link_clicks: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -430,14 +439,17 @@ class VideoMetricsORM(TimestampMixin, Base):
 
 
 class VideoUploadORM(TimestampMixin, Base):
-    """User-uploaded TikTok video file for analytics visual analysis."""
+    """User-uploaded media file for analytics visual analysis.
+    Carousel posts can have multiple uploads (one per image), ordered by position.
+    """
 
     __tablename__ = "video_uploads"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    video_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    video_id: Mapped[str] = mapped_column(String(128), index=True)
     tiktok_handle: Mapped[str] = mapped_column(String(128), index=True)
     storage_key: Mapped[str] = mapped_column(String(512))
     mime_type: Mapped[str] = mapped_column(String(128))
     file_size: Mapped[int] = mapped_column(Integer)
     original_filename: Mapped[str] = mapped_column(String(255))
+    position: Mapped[int] = mapped_column(Integer, default=0)

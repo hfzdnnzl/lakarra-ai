@@ -382,8 +382,11 @@ export interface VideoMetrics {
   watch_time?: number | null;
   average_watch_duration?: number | null;
   completion_rate?: number | null;
+  photos_viewed?: number | null;
+  /** @deprecated Not available on TikTok; kept for backward compat. */
   profile_visits?: number | null;
   followers_gained?: number | null;
+  /** @deprecated Not available on TikTok; kept for backward compat. */
   link_clicks?: number | null;
   user_notes?: string | null;
   publish_date?: string | null;
@@ -471,6 +474,13 @@ export interface ContentAnalysisSummary {
 /** @deprecated Use ContentAnalysisSummary */
 export type VideoAnalysisSummary = ContentAnalysisSummary;
 
+export interface VideoUploadInfo {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  position: number;
+}
+
 export interface ContentCatalogItem {
   video_id: string;
   content_type: ContentType;
@@ -488,8 +498,10 @@ export interface ContentCatalogItem {
   has_media_upload?: boolean;
   has_video_upload?: boolean;
   upload_filename?: string | null;
+  uploads?: VideoUploadInfo[];
   metrics: VideoMetrics;
   metrics_priority: string;
+  old_analysis_count?: number;
 }
 
 /** @deprecated Use ContentCatalogItem */
@@ -509,12 +521,25 @@ export interface MetricsReadiness {
   optional_recommended_for: string[];
 }
 
+export interface PaginationInfo {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  sort_by: string;
+  sort_order: string;
+}
+
 export interface ContentAnalyticsPage {
   overview: AccountOverview;
   readiness: MetricsReadiness;
   videos: VideoCatalogItem[];
   required_field_labels: Record<string, string>;
   optional_field_labels: Record<string, string>;
+  video_optional_field_labels: Record<string, string>;
+  image_optional_field_labels: Record<string, string>;
+  carousel_optional_field_labels: Record<string, string>;
+  pagination?: PaginationInfo | null;
 }
 
 export interface AnalyzeAllResponse {

@@ -109,7 +109,7 @@ class TestReviewFixes:
         db_session.commit()
 
         repo = AnalyticsRepository(db_session)
-        repo.upsert_video_upload(
+        repo.add_video_upload(
             video_id="lk-001",
             tiktok_handle="lakarra",
             storage_key="analytics/lk-001/full.mp4",
